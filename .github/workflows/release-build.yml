@@ -1,0 +1,45 @@
+name: Native release build
+on:
+  workflow_dispatch:
+    inputs:
+      tag: {description: Existing native release tag, required: true}
+      core_tag: {description: Published compatible core release tag, required: true}
+      sign: {description: Sign and notarize with configured Developer ID secrets, type: boolean, default: false}
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64, runtime_arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64, runtime_arch: x64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {ref: '${{ inputs.tag }}'}
+      - name: Require published core assets before native release
+        env: {GH_TOKEN: '${{ github.token }}', CORE_TAG: '${{ inputs.core_tag }}'}
+        run: |
+          mkdir -p "$RUNNER_TEMP/core"
+          gh release download "$CORE_TAG" -R tader/switchboard -p 'runtime-darwin-${{ matrix.runtime_arch }}.json' -D "$RUNNER_TEMP/core"
+          gh release download "$CORE_TAG" -R tader/switchboard -p 'switchboard-runtime-darwin-${{ matrix.runtime_arch }}.tar.gz' -D "$RUNNER_TEMP/core"
+          python3 - "$RUNNER_TEMP/core" <<'PY'
+          import pathlib, json, hashlib, sys
+          root=pathlib.Path(sys.argv[1]); m=json.loads(next(root.glob('*.json')).read_text())
+          assert m['origin']=='tader/switchboard' and m['protocol']==1
+          assert hashlib.sha256((root/m['archive']).read_bytes()).hexdigest()==m['sha256']
+          PY
+      - run: swift test && bash scripts/bundle.sh '${{ matrix.arch }}'
+      - name: Sign and notarize
+        if: inputs.sign
+        env:
+          CERTIFICATE: ${{ secrets.DEVELOPER_ID_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: bash scripts/sign-release.sh '${{ matrix.arch }}'
+      - env: {GH_TOKEN: '${{ github.token }}', TAG: '${{ inputs.tag }}'}
+        run: gh release upload "$TAG" .dist/*.zip --clobber
