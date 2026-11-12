@@ -1,0 +1,39 @@
+name: Check
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      expected_sha: {description: Expected release PR head, required: false}
+permissions:
+  contents: read
+jobs:
+  check:
+    name: Check (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64, runtime_arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64, runtime_arch: x64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - if: inputs.expected_sha != ''
+        env: {EXPECTED_SHA: '${{ inputs.expected_sha }}'}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Require the published compatible core runtime
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          mkdir -p "$RUNNER_TEMP/core"
+          gh release download --repo tader/switchboard -p 'runtime-darwin-${{ matrix.runtime_arch }}.json' -p 'switchboard-runtime-darwin-${{ matrix.runtime_arch }}.tar.gz' -D "$RUNNER_TEMP/core"
+          python3 scripts/prepare-smoke-runtime.py "$RUNNER_TEMP/core" '${{ matrix.runtime_arch }}'
+      - run: swift test
+        env:
+          SWITCHBOARD_TEST_RUNTIME_ASSETS: ${{ runner.temp }}/core
+          SWITCHBOARD_UI_SNAPSHOT_DIR: ${{ runner.temp }}/ui
+      - run: bash scripts/bundle.sh '${{ matrix.arch }}'
+      - name: Exercise the relocated packaged app
+        run: python3 scripts/smoke-app.py --app '.dist/${{ matrix.arch }}/Switchboard.app' --runtime "$RUNNER_TEMP/core/runtime" --seed-data "$RUNNER_TEMP/core/seed"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with: {name: 'unsigned-${{ matrix.arch }}', path: '.dist/*-unsigned.zip'}
