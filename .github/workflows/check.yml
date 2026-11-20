@@ -38,4 +38,8 @@ jobs:
       - name: Exercise the relocated packaged app
         run: python3 scripts/smoke-app.py --app '.dist/${{ matrix.arch }}/Switchboard.app' --runtime "$RUNNER_TEMP/core/runtime" --seed-data "$RUNNER_TEMP/core/seed"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with: {name: 'unsigned-${{ matrix.arch }}', path: '.dist/*-unsigned.zip'}
+        with:
+          name: unsigned-${{ matrix.arch }}
+          path: .dist/*-unsigned.zip
+          include-hidden-files: true
+          if-no-files-found: error
