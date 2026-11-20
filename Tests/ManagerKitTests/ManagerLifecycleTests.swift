@@ -12,6 +12,37 @@ private actor InstallerGate {
 }
 
 final class ManagerLifecycleTests: XCTestCase {
+    @MainActor func testReleaseLookupFailureDoesNotBecomeServerFailureAndRetryClearsWarning() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manager = Manager(settingsURL: root.appendingPathComponent("settings.json"))
+        manager.phase = "Running"; manager.paired = true
+        manager.error = "Synthetic independent server error"
+        let existing = RuntimeRelease(tag: "v1.0.0", prerelease: false, available: true)
+        manager.releases = [existing]; manager.releasePage = 1
+        manager.releaseLoader = { _ in throw ManagerError.invalid("Synthetic offline catalogue") }
+        manager.checkReleases(more: true)
+        for _ in 0..<2000 {
+            if !manager.checkingReleases { break }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertFalse(manager.checkingReleases)
+        XCTAssertTrue(manager.releaseError?.contains("Synthetic offline catalogue") == true)
+        XCTAssertEqual(manager.error, "Synthetic independent server error")
+        XCTAssertEqual(manager.phase, "Running"); XCTAssertTrue(manager.paired)
+        XCTAssertEqual(manager.releases, [existing]); XCTAssertEqual(manager.releasePage, 1)
+        manager.releaseLoader = { _ in [existing] }
+        manager.checkReleases()
+        XCTAssertNil(manager.releaseError)
+        for _ in 0..<2000 {
+            if !manager.checkingReleases { break }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertFalse(manager.checkingReleases); XCTAssertNil(manager.releaseError)
+        XCTAssertEqual(manager.error, "Synthetic independent server error")
+        XCTAssertEqual(manager.phase, "Running"); XCTAssertTrue(manager.paired)
+    }
+
     @MainActor func testDataOnlyRelocationRebasesSavedMetadataAfterOriginalRemoval() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

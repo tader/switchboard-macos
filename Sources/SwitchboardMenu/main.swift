@@ -13,6 +13,7 @@ import ServiceManagement
     var smokeRestarted = false
     var smokeReport: URL?
     var smokePassed = false
+    var smokeFailure = ""
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         let main = NSMenu(), application = NSMenu(), edit = NSMenu(), windowMenu = NSMenu()
@@ -42,11 +43,14 @@ import ServiceManagement
     }
     func smokeStep() {
         smokeTicks += 1
-        if model.error != nil || smokeTicks > 100 { smokeTimer?.invalidate(); NSApp.terminate(nil); return }
+        if model.error != nil || smokeTicks > 100 {
+            smokeFailure = model.error != nil ? "manager-error" : "readiness-timeout"
+            smokeTimer?.invalidate(); NSApp.terminate(nil); return
+        }
         guard model.phase == "Running", model.paired else { return }
         if !smokeRestarted {
             window?.performClose(nil)
-            guard window?.isVisible == false, model.isRunning else { smokeTimer?.invalidate(); NSApp.terminate(nil); return }
+            guard window?.isVisible == false, model.isRunning else { smokeFailure = "window-close-check"; smokeTimer?.invalidate(); NSApp.terminate(nil); return }
             smokeRestarted = true; model.restart()
         } else {
             smokePassed = true; smokeTimer?.invalidate(); NSApp.terminate(nil)
@@ -54,7 +58,7 @@ import ServiceManagement
     }
     func applicationWillTerminate(_ notification: Notification) {
         if let smokeReport {
-            let result: [String: Any] = ["passed": smokePassed, "closedWindowKeptRunning": smokeRestarted, "quitStoppedOwnedProcesses": !model.isRunning, "port": model.settings.port]
+            let result: [String: Any] = ["passed": smokePassed, "failure": smokeFailure, "ticks": smokeTicks, "releaseLookupFailed": model.releaseError != nil, "closedWindowKeptRunning": smokeRestarted, "quitStoppedOwnedProcesses": !model.isRunning, "port": model.settings.port]
             if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted]) { try? data.write(to: smokeReport) }
         }
     }

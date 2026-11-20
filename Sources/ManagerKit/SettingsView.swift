@@ -41,6 +41,7 @@ public struct SettingsView: View {
                 GroupBox("Server updates") {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(model.runtimeDescription).textSelection(.enabled)
+                        if let error = model.releaseError { Text(error).foregroundStyle(.red).textSelection(.enabled).accessibilityIdentifier("release-error-message") }
                         Toggle("Include prereleases", isOn: $showPrereleases)
                         Picker("Version", selection: $selectedRelease) {
                             Text("Choose a version").tag("")

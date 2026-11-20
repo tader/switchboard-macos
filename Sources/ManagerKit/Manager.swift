@@ -8,6 +8,8 @@ import Combine
     @Published public var releases: [RuntimeRelease] = []
     @Published public var releasePage = 0
     @Published public var checkingReleases = false
+    @Published public var releaseError: String?
+    var releaseLoader: @Sendable (Int) async throws -> [RuntimeRelease] = { try await ReleaseCatalog.load(page: $0) }
     public var runtimeDescription: String {
         guard let path = settings.runtimePath else { return "No runtime installed" }
         guard let bytes = try? Data(contentsOf: URL(fileURLWithPath: path).appendingPathComponent("runtime.json")), let m = try? JSONDecoder().decode(RuntimeManifest.self, from: bytes) else { return "Runtime metadata is missing or damaged. Choose a version to repair it." }
@@ -44,12 +46,12 @@ import Combine
     }
     public func checkReleases(more: Bool = false) {
         guard !checkingReleases else { return }
-        checkingReleases = true
+        checkingReleases = true; releaseError = nil
         let page = more ? releasePage + 1 : 1
         Task {
             defer { checkingReleases = false }
-            do { let found = try await ReleaseCatalog.load(page: page); releases = more ? releases + found.filter { item in !releases.contains(where: { $0.id == item.id }) } : found; releasePage = page }
-            catch { self.error = "Could not load releases. Retry when connected. " + error.localizedDescription }
+            do { let found = try await releaseLoader(page); releases = more ? releases + found.filter { item in !releases.contains(where: { $0.id == item.id }) } : found; releasePage = page }
+            catch { self.releaseError = "Could not load releases. Retry when connected. " + error.localizedDescription }
         }
     }
     public func installRuntime(_ release: RuntimeRelease) {

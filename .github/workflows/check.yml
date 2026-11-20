@@ -12,6 +12,7 @@ jobs:
   check:
     name: Check (${{ matrix.arch }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - {runner: macos-15, arch: arm64, runtime_arch: arm64}

@@ -10,6 +10,7 @@ with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[
 settings={'dataPath':str(data),'statePath':str(root/'updater'),'host':'127.0.0.1','port':port,'browserURL':f'http://127.0.0.1:{port}','startServer':True,'configured':True,'runtimePath':str(pathlib.Path(a.runtime).resolve())}
 file=root/'settings.json';file.write_text(json.dumps(settings));file.chmod(0o600)
 report=root/'result.json'
+print('Smoke artifacts: '+str(root), flush=True)
 process=subprocess.run([str(app/'Contents/MacOS/SwitchboardMenu'),'--settings-file',str(file),'--show-settings','--appearance','dark','--window-width','460','--smoke-report',str(report)],timeout=130,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 assert process.returncode==0
 result=json.loads(report.read_text());assert result['passed'] and result['closedWindowKeptRunning'] and result['quitStoppedOwnedProcesses'],result
