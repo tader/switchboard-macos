@@ -7,15 +7,24 @@ import subprocess
 from pathlib import Path
 
 
+def validate_identity(identity):
+    if not identity.startswith("Developer ID Application:"):
+        raise ValueError(
+            "Direct-download releases require a Developer ID Application certificate. "
+            "Apple Development and Apple Distribution certificates cannot be used. "
+            "Create a Developer ID Application certificate, export it with its private key "
+            "as .p12, and pass its full name to --identity."
+        )
+
+
 def configure(args, password):
+    validate_identity(args.identity)
     certificate = base64.b64encode(args.certificate.expanduser().read_bytes()).decode()
     key = args.notary_key.expanduser().read_text()
     if not certificate or "-----BEGIN PRIVATE KEY-----" not in key:
         raise ValueError("Supply a .p12 certificate export and a .p8 private key")
     if not password:
         raise ValueError("The certificate export must have a password")
-    if not args.identity.startswith("Developer ID Application:"):
-        raise ValueError("Use a Developer ID Application signing identity")
     # Values travel over stdin, never command arguments or temporary plaintext files.
     secrets = {
         "DEVELOPER_ID_CERTIFICATE": certificate,
@@ -42,7 +51,11 @@ def main():
     parser.add_argument("--key-id", required=True)
     parser.add_argument("--issuer", required=True, help="Team API issuer UUID, not Apple Developer Team ID")
     args = parser.parse_args()
-    configure(args, getpass.getpass("Certificate .p12 export password: "))
+    try:
+        validate_identity(args.identity)
+        configure(args, getpass.getpass("Certificate .p12 export password: "))
+    except ValueError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":

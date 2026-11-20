@@ -21,6 +21,13 @@ spec.loader.exec_module(setup)
 
 
 class CredentialSetupTests(unittest.TestCase):
+    def test_development_certificate_reports_required_replacement_before_reading_files(self):
+        args = argparse.Namespace(identity="Apple Development: Synthetic (TEST)")
+        with patch.object(setup.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "Create a Developer ID Application certificate"):
+                setup.configure(args, "synthetic-password")
+            run.assert_not_called()
+
     def test_values_use_stdin_and_enable_only_after_all_uploads(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
