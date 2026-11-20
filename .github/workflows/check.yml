@@ -22,6 +22,7 @@ jobs:
       - if: inputs.expected_sha != ''
         env: {EXPECTED_SHA: '${{ inputs.expected_sha }}'}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - run: python3 scripts/test-release-tools.py
       - name: Require the published compatible core runtime
         env: {GH_TOKEN: '${{ github.token }}'}
         run: |

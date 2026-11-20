@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
@@ -25,3 +28,18 @@ jobs:
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
           GH_REPO: ${{ github.repository }}
         run: node .github/scripts/dispatch-release-checks.mjs
+  native-release:
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.release.outputs.tag_name }}
+      core_tag: ${{ vars.CORE_RELEASE_TAG || '' }}
+      sign: ${{ vars.MACOS_SIGN_RELEASES == 'true' }}
+    secrets:
+      DEVELOPER_ID_CERTIFICATE: ${{ secrets.DEVELOPER_ID_CERTIFICATE }}
+      DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+      SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+      NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
