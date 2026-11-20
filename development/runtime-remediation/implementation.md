@@ -1,0 +1,13 @@
+# Independent runtime installation
+
+Native release discovery and installation do not use the server updater API. Fresh runtime directories include revision, architecture, and a unique installation identifier. The native installer takes the same SQLite controller/data leases as the runtime before snapshotting and selection. A separate runtime-install.json journal rolls forward current.json and settings after interrupted selection; core journals are never rewritten.
+
+The migration-only preflight runs the downloaded runtime against a copied database with a 90-second timeout. It does not import server/main.ts or load plugins. Installation leaves the server stopped. Backups remain under backups/native-<identifier>. Restoration after a subsequent Start is an explicit owner decision because startup may have performed external writes.
+
+Verification uses synthetic fixtures for catalogue parsing, architecture diagnostics, cross-controller exclusion, selection recovery, offline snapshot preservation, and failed migration preflight. UI rendering is deterministic and does not contact the release service. Packaged-runtime import/smoke validation still requires separately supplied compatible published runtime assets.
+
+Explicit Server Lock recovery takes both SQLite ownership leases before archiving advisory metadata. It deliberately does not treat PID existence or hostname equality as authoritative: records can survive hostname changes and PID reuse. Recovery never signals processes or removes lease databases, and is refused if another server or updater holds either lease.
+
+Installation snapshots now use DataSnapshot rather than Relocation.copyVerified. Snapshot traversal never follows symbolic directory links, verifies file hashes and normalized link targets, rewrites internal absolute targets into portable relative links, and restricts permissions only on copied files/directories. Three Chromium coordination symlink/socket names are excluded. External targets, symlink cycles, and unsupported special files fail explicitly. Regression coverage includes installation with a browser socket, source permission preservation, missing targets, external chains, and internal links after original removal.
+
+Release catalogue failures are shown within Server updates and do not replace server lifecycle errors. A failed background update check must not prevent a healthy local server from starting or invalidate the packaged lifecycle smoke. Smoke reports contain only fixed failure labels and aggregate status, never raw server responses, credentials or bootstrap URLs. Both architecture checks finish independently so one failure does not hide the other result.
