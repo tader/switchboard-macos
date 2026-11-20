@@ -2,7 +2,7 @@
 
 A menu bar manager for a local Switchboard server. Requires macOS 14 or later on Apple Silicon or Intel. The app downloads a prepared server runtime; Node, Git, npm and Xcode are not required on your Mac.
 
-Current builds are **unsigned development builds**. No production Developer ID or notarization identity is configured. The optional release workflow supports signing and notarization once those credentials are supplied. Do not treat development artifacts as production-signed releases.
+The app ZIPs published on [GitHub Releases](https://github.com/tader/switchboard-macos/releases) are **Developer ID signed and notarized by Apple**, with the notarization ticket stapled to the app. Download `Switchboard-<version>-arm64.zip` for Apple Silicon or `Switchboard-<version>-x86_64.zip` for Intel. Local builds and CI artifacts labelled `unsigned` are development builds without release signing or notarization.
 
 ## Set up
 
@@ -71,4 +71,4 @@ Installation snapshots preserve symbolic links whose targets stay inside the dat
 
 ## Release automation
 
-Merging a Release Please PR starts native builds for Apple Silicon and Intel and attaches the compiled app ZIPs to that GitHub Release. Signing and notarization are enabled after configuring Apple credentials. See the [release maintainer setup](development/releases/README.md) for certificate export, API key creation, GitHub Secrets and first-release verification.
+Merging a Release Please PR builds, signs and notarizes the app for Apple Silicon and Intel, then attaches the compiled app ZIPs to that GitHub Release. Signed builds must pass notarization, ticket stapling, signature verification and Gatekeeper assessment before upload. See the [release maintainer setup](development/releases/README.md) for certificate export, API key creation, GitHub Secrets and first-release verification.
