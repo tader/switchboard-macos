@@ -45,10 +45,26 @@ Settings are owner-readable only. The manager keeps its narrow updater credentia
 
 ## Updates, backups and recovery
 
-Choose **Updates** or **Check for Updates** in Settings, then **Install Update** when a verified stable release is available. The core release must contain a compatible prepared runtime for your architecture. The updater downloads and checks it without building source on your Mac. It retains the previous runtime and makes a full data snapshot before cutover. **Cancel Update** is available while queued or preparing.
+Choose **Updates** or **Check for Updates** in Settings, then select a version and choose **Install / Reinstall** or **Install Latest Stable**. These actions do not require a running server or pairing. Prepared runtime assets must be published for the app’s architecture. Installation downloads fresh files, checks a disposable database copy, preserves a full data snapshot, and leaves the server stopped. Enable **Include prereleases** to see prereleases. **Cancel** is available during download and preparation; selection commits finish before Quit.
 
 Backups and the owner-only `journal.json`, `history/` and `last-success.json` are in your updater folder; **Show Logs** opens that folder. Keep independent off-device backups of the entire data folder and updater folder while stopped. Include `secret.key`, the database, installed extensions, extension state and browser profiles together. Snapshots contain credentials; keep them private and leave room for full copies.
 
 Before normal operation opens, startup failure automatically restores the complete snapshot and previous runtime. After opening, automatic restoration is disabled because it could discard new writes or repeat external actions. If Settings shows `recovery-required`, stop the app and preserve both current folders before making a recovery decision. The journal identifies the matching previous runtime and snapshot. Restore a complete snapshot to a new data folder, then select that folder while stopped; retain the failed data and original journal. Select a compatible runtime using the recorded `current.json` release pointer only as an explicit owner recovery step, and archive the active journal after recording that decision. Never combine a database with another snapshot's encryption key. External effects cannot be undone by restoring local files.
 
 The app does not update its own binary in version one. Install a new native app release separately; server updates use the managed updater.
+
+## Build locally
+
+Run `just release` to build for this Mac, or `just release arm64` / `just release x86_64`. Swift and just are required. The optimized unsigned app is `.dist/<arch>/Switchboard.app`; the versioned unsigned ZIP is in `.dist/`.
+
+## Install or repair without a running server
+
+Open Settings → Server updates and choose **Check for Updates**. Select a version and choose **Install / Reinstall**, or **Install Latest Stable**. Enable **Include prereleases** to select a published prerelease. Releases require compatible prepared runtime assets. Use **More Versions** for older releases.
+
+These controls work without pairing or a running Switchboard. **Stop and Install** stops the owned server first. Installation leaves the server stopped. Reinstallation downloads a fresh runtime, including the architecture required by the app, and preserves the old runtime. Existing data is backed up under the updater folder and migrations are checked against a disposable database copy; incompatible downgrades are refused. Start Switchboard separately when ready. Native installation does not automatically restore data after a failed Start; preserve the current data and backups before deciding on recovery.
+
+If runtime metadata is missing, incompatible, or damaged, choose another release or reinstall. An active server lease or unresolved updater recovery journal must be resolved before runtime selection; the app never deletes those records to bypass recovery.
+
+If installation reports **A server lock remains**, choose **Recover Server Lock…** in Settings → Server updates. The app checks the server and updater’s exclusive SQLite leases, then moves the advisory `.server-lock` record into the updater folder’s owner-only `recovered-locks/` directory. This also handles malformed records, renamed hosts, and reused process IDs. It does not signal a process or delete the lease databases. Recovery is refused while either lease is held; stop the owning Switchboard instance first. After recovery, retry installation or Start.
+
+Installation snapshots preserve symbolic links whose targets stay inside the data folder, rebasing absolute internal links so the backup remains usable if the original folder moves. Chromium’s transient `SingletonLock`, `SingletonCookie`, and `SingletonSocket` links are omitted from snapshots; the original links are left untouched. Persistent links outside the data folder are refused with the relative path of the offending link: move the target inside the data folder before retrying. Folder relocation retains its separate restriction on symbolic links.

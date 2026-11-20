@@ -11,6 +11,10 @@ public struct RuntimeManifest: Codable, Equatable, Sendable {
     public let archive: String
     public let sha256: String
     public func validate(version expectedVersion: String, revision expectedRevision: String, arch expectedArch: String) throws {
+        guard arch == expectedArch else { throw ManagerError.invalid("Installed runtime architecture is \(arch); this app requires \(expectedArch). Reinstall Switchboard or choose another version.") }
+        guard origin == "tader/switchboard" else { throw ManagerError.invalid("Runtime origin is invalid. Choose a published Switchboard version.") }
+        guard `protocol` == 1 else { throw ManagerError.invalid("Runtime protocol is unsupported. Choose another compatible version.") }
+        guard platform == "darwin" else { throw ManagerError.invalid("This runtime is not built for macOS. Reinstall Switchboard.") }
         guard origin == "tader/switchboard", version == expectedVersion, revision == expectedRevision, revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil, `protocol` == 1, platform == "darwin", arch == expectedArch, ["arm64", "x64"].contains(arch), archive == "switchboard-runtime-darwin-\(arch).tar.gz", sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { throw ManagerError.invalid("This release is not a compatible macOS runtime.") }
     }
 }
@@ -35,16 +39,19 @@ public enum RuntimeInstaller {
         return try Data(contentsOf: file)
     }
     public static func install(statePath: String) async throws -> String {
-        let release = try JSONSerialization.jsonObject(with: await download(URL(string: "https://api.github.com/repos/tader/switchboard/releases/latest")!)) as? [String: Any]
-        guard let tag = release?["tag_name"] as? String, tag.range(of: "^v[0-9]+\\.[0-9]+\\.[0-9]+$", options: .regularExpression) != nil, release?["draft"] as? Bool == false, release?["prerelease"] as? Bool == false else { throw ManagerError.invalid("No compatible stable release is available.") }
-        let commit = try JSONSerialization.jsonObject(with: await download(URL(string: "https://api.github.com/repos/tader/switchboard/commits/\(tag)")!)) as? [String: Any]
+        let releases = try await ReleaseCatalog.load()
+        guard let release = releases.first(where: { !$0.prerelease && $0.available }) else { throw ManagerError.invalid("No compatible stable runtime is published yet.") }
+        return try await install(release: release, statePath: statePath)
+    }
+    public static func install(release: RuntimeRelease, statePath: String) async throws -> String {
+        let commit = try JSONSerialization.jsonObject(with: await download(URL(string: "https://api.github.com/repos/tader/switchboard/commits/\(release.tag)")!)) as? [String: Any]
         guard let revision = commit?["sha"] as? String else { throw ManagerError.invalid("Cannot verify release revision.") }
-        let base = "https://github.com/tader/switchboard/releases/download/\(tag)/"
+        let base = "https://github.com/tader/switchboard/releases/download/\(release.tag)/"
         let metadata = try await download(URL(string: base + "runtime-darwin-\(arch).json")!)
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: metadata)
-        try manifest.validate(version: String(tag.dropFirst()), revision: revision, arch: arch)
+        try manifest.validate(version: release.version, revision: revision, arch: arch)
         let archive = try await download(URL(string: base + manifest.archive)!)
-        return try extract(archive: archive, manifest: manifest, statePath: statePath)
+        return try extract(archive: archive, manifest: manifest, statePath: statePath, fresh: true)
     }
     public static func inspectTar(_ bytes: Data) throws {
         func string(_ offset: Int, _ count: Int) -> String { String(decoding: bytes[offset..<offset+count].prefix { $0 != 0 }, as: UTF8.self) }
@@ -60,7 +67,7 @@ public enum RuntimeInstaller {
         }
         throw ManagerError.invalid("Truncated runtime archive.")
     }
-    public static func extract(archive: Data, manifest: RuntimeManifest, statePath: String) throws -> String {
+    public static func extract(archive: Data, manifest: RuntimeManifest, statePath: String, fresh: Bool = false) throws -> String {
         try Task.checkCancellation()
         try manifest.validate(version: manifest.version, revision: manifest.revision, arch: arch)
         let digest = SHA256.hash(data: archive).map { String(format: "%02x", $0) }.joined()
@@ -85,7 +92,7 @@ public enum RuntimeInstaller {
         try Task.checkCancellation()
         try JSONEncoder().encode(manifest).write(to: staging.appendingPathComponent("runtime.json"))
         try Data().write(to: staging.appendingPathComponent(".prepared"))
-        let destination = releases.appendingPathComponent(manifest.revision)
+        let destination = releases.appendingPathComponent(fresh ? "\(manifest.revision)-\(arch)-\(UUID().uuidString)" : manifest.revision)
         if FileManager.default.fileExists(atPath: destination.path) {
             let saved = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: destination.appendingPathComponent("runtime.json")))
             guard saved == manifest, FileManager.default.isExecutableFile(atPath: destination.appendingPathComponent("bin/node").path) else { throw ManagerError.invalid("The retained release has a different identity. Preserve it and inspect its metadata before retrying.") }

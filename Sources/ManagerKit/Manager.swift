@@ -5,6 +5,14 @@ import Combine
 
 @MainActor public final class Manager: ObservableObject {
     @Published public var settings: Settings
+    @Published public var releases: [RuntimeRelease] = []
+    @Published public var releasePage = 0
+    @Published public var checkingReleases = false
+    public var runtimeDescription: String {
+        guard let path = settings.runtimePath else { return "No runtime installed" }
+        guard let bytes = try? Data(contentsOf: URL(fileURLWithPath: path).appendingPathComponent("runtime.json")), let m = try? JSONDecoder().decode(RuntimeManifest.self, from: bytes) else { return "Runtime metadata is missing or damaged. Choose a version to repair it." }
+        return "Switchboard \(m.version) · \(m.arch) (app: \(RuntimeInstaller.arch))"
+    }
     @Published public var phase = "Stopped"
     @Published public var error: String?
     @Published public var attention = 0
@@ -30,7 +38,54 @@ import Combine
     public init(settingsURL: URL) {
         self.settingsURL = settingsURL
         self.settings = (try? Settings.load(settingsURL)) ?? Settings()
+        do { try RuntimeSelection.recover(settingsURL: settingsURL, settings: &settings) }
+        catch { self.error = "Installation recovery failed. Preserve the updater folder and retry: " + error.localizedDescription }
         refreshLoginStatus()
+    }
+    public func checkReleases(more: Bool = false) {
+        guard !checkingReleases else { return }
+        checkingReleases = true
+        let page = more ? releasePage + 1 : 1
+        Task {
+            defer { checkingReleases = false }
+            do { let found = try await ReleaseCatalog.load(page: page); releases = more ? releases + found.filter { item in !releases.contains(where: { $0.id == item.id }) } : found; releasePage = page }
+            catch { self.error = "Could not load releases. Retry when connected. " + error.localizedDescription }
+        }
+    }
+    public func installRuntime(_ release: RuntimeRelease) {
+        guard !working && !isInstalling else { return }
+        if isRunning {
+            onStopped = { [weak self] in self?.onStopped = nil; self?.installRuntime(release) }; stop(); return
+        }
+        error = nil; working = true; phase = "Downloading runtime…"; onChange?()
+        let original = settings, file = settingsURL
+        installTask = Task {
+            defer { installTask = nil; working = false; phase = "Stopped"; onChange?(); onStopped?() }
+            do {
+                try original.validate()
+                let download = Task.detached { try await RuntimeInstaller.install(release: release, statePath: original.statePath) }
+                let path = try await withTaskCancellationHandler(operation: { try await download.value }, onCancel: { download.cancel() })
+                try Task.checkCancellation()
+                phase = "Verifying data and selecting runtime…"; onChange?()
+                // Selection is an indivisible operation: Quit waits for completion.
+                let commit = Task.detached { try RuntimeSelection().select(runtime: path, settings: original, settingsURL: file) }
+                settings = try await commit.value
+                paired = false; eligible = false; updateState = "Installed. Start Switchboard when ready."
+            } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        }
+    }
+    public func recoverServerLock() {
+        guard !isRunning && !working && !isInstalling else { return }
+        let original = settings
+        working = true; phase = "Recovering server lock…"; error = nil; onChange?()
+        installTask = Task {
+            defer { installTask = nil; working = false; phase = "Stopped"; onChange?(); onStopped?() }
+            do {
+                let recovery = Task.detached { try RuntimeSelection().recoverServerLock(settings: original) }
+                let recovered = try await recovery.value
+                updateState = recovered ? "Server lock archived. Retry installation or start Switchboard." : "No server lock remains. Retry installation or start Switchboard."
+            } catch { self.error = "Could not recover the server lock. " + error.localizedDescription }
+        }
     }
     public func refreshLoginStatus() {
         switch SMAppService.mainApp.status {
@@ -91,7 +146,9 @@ import Combine
         }
     }
     private func launch() throws {
-        guard let runtime = settings.runtimePath else { throw ManagerError.invalid("Install a runtime first.") }
+        let current = URL(fileURLWithPath: settings.statePath).appendingPathComponent("current.json")
+        let pointer = FileManager.default.fileExists(atPath: current.path) ? try JSONDecoder().decode([String: String].self, from: Data(contentsOf: current))["release"] : nil
+        guard let runtime = pointer ?? settings.runtimePath else { throw ManagerError.invalid("Install a runtime first.") }
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: URL(fileURLWithPath: runtime).appendingPathComponent("runtime.json")))
         try manifest.validate(version: manifest.version, revision: manifest.revision, arch: RuntimeInstaller.arch)
         try FileManager.default.createDirectory(atPath: settings.dataPath, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -152,7 +209,7 @@ import Combine
     }
     public func stop() { if isRunning { working = true; phase = "Stopping…"; send(["action": "quit"]); onChange?() } else if isInstalling { cancelInstall() } else { onStopped?() } }
     public func restart() { onStopped = { [weak self] in self?.onStopped = nil; self?.start() }; stop() }
-    public func update(_ action: String) { guard ["check", "update", "cancel"].contains(action) else { return }; send(["action": action]) }
+    public func update(_ action: String) { if action == "check" { checkReleases(); return }; guard ["check", "update", "cancel"].contains(action) else { return }; send(["action": action]) }
     public func open() { if phase == "Running", let url = URL(string: settings.browserURL) { NSWorkspace.shared.open(url) } else { start() } }
     public func openConnections() { guard phase == "Running", let url = URL(string: settings.appURL + "/connections") else { return }; NSWorkspace.shared.open(url) }
     public func showLogs() { NSWorkspace.shared.open(URL(fileURLWithPath: settings.statePath)) }
