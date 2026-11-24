@@ -106,32 +106,49 @@ public struct SettingsView: View {
                     if model.loginStatus == "Approval required" { Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() } }
                 }
             }
-            section("App updates") {
-                Text("Switchboard for macOS · \(appUpdater.version)").textSelection(.enabled)
-                if let message = appUpdater.availabilityMessage {
-                    Text(message).font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
-                } else {
-                    Toggle("Check for app updates automatically", isOn: Binding(get: { appUpdater.automaticallyChecksForUpdates }, set: { appUpdater.setAutomaticallyChecksForUpdates($0) }))
-                    Text("You’ll be asked before installing. Installing an app update stops your local server and reopens the app.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
-                    Button("Check for App Updates…") { appUpdater.checkForUpdates() }.disabled(!appUpdater.canCheckForUpdates)
-                }
-            }
-            section("Server updates") {
-                if let installed = model.installedTag { Text("Installed version: \(installed)") }
-                else { Text(model.settings.runtimePath == nil ? "Switchboard is not installed yet." : "The installation needs repair. Open Advanced to reinstall.") }
-                if let pin = model.settings.pinnedRelease {
-                    Label("Pinned to \(pin)", systemImage: "pin").font(.callout)
-                    Text("Change the pinned version in Advanced.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
-                } else {
-                    Picker("Release channel", selection: Binding(get: { model.settings.releaseChannel ?? "stable" }, set: { model.savePreferences(channel: $0) })) {
-                        Text("Stable — Recommended").tag("stable")
-                        Text("Development — Early releases").tag("development")
-                    }.disabled(model.working)
-                    Text(model.settings.releaseChannel == "development" ? "Early releases may be less reliable." : "Stable releases are recommended for everyday use.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
-                }
-                releaseActions
-            }
+            updatesSection
         }
+    }
+    var updatesSection: some View {
+        section("Updates") {
+            HStack(alignment: .top, spacing: 16) {
+                section("Mac app") {
+                    updateHint("The menu bar app on your Mac.")
+                    Text("Version: \(appUpdater.version)").textSelection(.enabled)
+                    if let message = appUpdater.availabilityMessage { updateHint(message) }
+                    else {
+                        Toggle("Check automatically", isOn: Binding(get: { appUpdater.automaticallyChecksForUpdates }, set: { appUpdater.setAutomaticallyChecksForUpdates($0) }))
+                            .accessibilityLabel("Check for Mac app updates automatically")
+                        Button("Check for updates…") { appUpdater.checkForUpdates() }.disabled(!appUpdater.canCheckForUpdates)
+                            .accessibilityLabel("Check for Mac app updates")
+                        updateHint("Asks before installing. Stops server and reopens app.")
+                    }
+                }
+                Divider()
+                section("Server") {
+                    updateHint("Runs Switchboard in your browser.")
+                    if let installed = model.installedTag { Text("Version: \(installed)") }
+                    else { Text(model.settings.runtimePath == nil ? "Not installed yet." : "The installation needs repair. Open Advanced to reinstall.") }
+                    if let pin = model.settings.pinnedRelease {
+                        Label("Pinned to \(pin)", systemImage: "pin").font(.callout)
+                        Text("Change the pinned version in Advanced.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Update channel").font(.callout)
+                            Picker("Update channel", selection: Binding(get: { model.settings.releaseChannel ?? "stable" }, set: { model.savePreferences(channel: $0) })) {
+                                Text("Stable (recommended)").tag("stable")
+                                Text("Development").tag("development")
+                            }.labelsHidden().frame(maxWidth: .infinity).disabled(model.working)
+                        }
+                        if model.settings.releaseChannel == "development" { updateHint("Early releases may be less reliable.") }
+                    }
+                    releaseActions
+                }
+            }.fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    private func updateHint(_ text: String) -> some View {
+        Text(text).font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
     }
     private var releaseActions: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -141,14 +158,14 @@ public struct SettingsView: View {
                 if model.settings.configured {
                     if model.installedTag == target.tag { Label("Up to date", systemImage: "checkmark.circle") }
                     else {
-                        Button(model.isRunning ? "Stop & Update" : "Install Selected Release") { model.installRuntime(target) }.disabled(model.working)
-                        Text("Installation preserves your data and leaves Switchboard stopped.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
+                        Button(model.isRunning ? "Stop & Update" : "Install update") { model.installRuntime(target) }.disabled(model.working)
+                        Text("Keeps your data. Leaves server stopped.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             } else if !model.checkingReleases && model.releaseError == nil {
                 Text("No compatible release is available for this selection.").foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
             }
-            Button(model.checkingReleases ? "Checking…" : "Check for Updates") { model.checkReleases() }.disabled(model.checkingReleases || model.working)
+            Button(model.checkingReleases ? "Checking…" : "Check for updates…") { model.checkReleases() }.disabled(model.checkingReleases || model.working).accessibilityLabel("Check for server updates")
         }
     }
     private var progress: some View {

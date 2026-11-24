@@ -37,7 +37,7 @@ This feature trusts the macOS account owning the local installation to recover i
 
 ## Menu bar
 
-Left-click the icon to open a running server in your default browser. If stopped or installing, left-click opens setup/settings. Right-click for **Open**, **Start/Stop**, **Restart**, **Updates**, **Settings**, **Show Logs** and **Quit**.
+Left-click the icon to open a running server in your default browser. If stopped or installing, left-click opens setup/settings. Right-click for **Open**, **Start/Stop**, **Restart**, **Settings**, **Show Logs** and **Quit**.
 
 Closing Settings leaves the app and server running. **Quit** gracefully stops the app's own server and updater. During a server update it waits for cutover/recovery to finish before quitting. If the app crashes, pipe closure stops the supervisor and its server; if the supervisor crashes, IPC disconnection stops its server. A subsequent launch uses the recovery journal rather than replaying an interrupted deployment.
 
@@ -55,7 +55,7 @@ Settings are owner-readable only. The manager keeps its narrow updater credentia
 
 ## Updates, backups and recovery
 
-Settings → Updates follows **Stable — Recommended** by default. Choose **Development — Early releases** to follow published prereleases with compatible macOS runtime assets. **Check for Updates** resolves the latest compatible release; installation starts only when you choose it. To select a particular version, open **Advanced…**, enable **Pin a specific version**, and choose a release. Disable pinning to return to your channel. Download progress shows actual bytes and a percentage when the total size is available, followed by verification and installation stages. Installation preserves your data and leaves Switchboard stopped. Cancellation is available before the final selection commit.
+Settings → Updates → Server follows **Stable (recommended)** by default. Choose **Development** to follow published prereleases with compatible macOS runtime assets. **Check for updates…** resolves the latest compatible release; installation starts only when you choose it. To select a particular version, open **Advanced…**, enable **Pin a specific version**, and choose a release. Disable pinning to return to your channel. Download progress shows actual bytes and a percentage when the total size is available, followed by verification and installation stages. Installation preserves your data and leaves Switchboard stopped. Cancellation is available before the final selection commit.
 
 Backups and the owner-only `journal.json`, `history/` and `last-success.json` are in your updater folder; **Show Logs** opens that folder. Keep independent off-device backups of the entire data folder and updater folder while stopped. Include `secret.key`, the database, installed extensions, extension state and browser profiles together. Snapshots contain credentials; keep them private and leave room for full copies.
 
@@ -63,7 +63,9 @@ Before normal operation opens, startup failure automatically restores the comple
 
 ## App updates
 
-Signed releases check GitHub for new stable macOS app releases automatically, normally once a day. You are asked before downloading and installing an update; app updates are never installed silently. Use **Check for App Updates…** from the menu bar or Settings → App updates to check immediately. Turn off **Check for app updates automatically** if you prefer manual checks.
+In Settings → Updates, **Mac app** is the menu bar app on your Mac; **Server** runs Switchboard in your browser. Both update controls live here, side by side.
+
+Signed releases check GitHub for new stable macOS app releases automatically, normally once a day. You are asked before downloading and installing an update; app updates are never installed silently. Use **Check for updates…** from Settings → Updates → Mac app to check immediately. Turn off **Check automatically** if you prefer manual checks.
 
 Installing an app update stops the owned server gracefully and waits for installation cleanup or an active server update to finish. The app then updates and reopens. Your startup preference determines whether the server starts again. Your accounts, data folders and server release preference are retained.
 
@@ -77,7 +79,7 @@ Run `just release` to build for this Mac, or `just release arm64` / `just releas
 
 ## Install or repair without a running server
 
-Open Settings → Updates and choose **Check for Updates**, then install the selected release. For older versions, open **Advanced…** and enable **Pin a specific version**. Use **Load Older Versions** to browse earlier releases. **Reinstall Selected Release** is under Advanced → Maintenance.
+Open Settings → Updates → Server and choose **Check for updates…**, then install the selected release. For older versions, open **Advanced…** and enable **Pin a specific version**. Use **Load Older Versions** to browse earlier releases. **Reinstall Selected Release** is under Advanced → Maintenance.
 
 These controls work without pairing or a running Switchboard. **Stop & Update** stops the owned server first. Installation leaves the server stopped. Reinstallation downloads a fresh runtime, including the architecture required by the app, and preserves the old runtime. Existing data is backed up under the updater folder and migrations are checked against a disposable database copy; incompatible downgrades are refused. Start Switchboard separately when ready. Native installation does not automatically restore data after a failed Start; preserve the current data and backups before deciding on recovery.
 
