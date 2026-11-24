@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.3.0...switchboard-macos-v0.3.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* keep app and server update controls together in settings ([5bb8724](https://github.com/tader/switchboard-macos/commit/5bb872402adab37a33bf02205ee5b44472083765))
+* keep app and server update controls together in settings ([ac90a04](https://github.com/tader/switchboard-macos/commit/ac90a04df34ef103d91b71242a5120dfc1e5d377))
+* publish appcasts for component-prefixed release tags ([2be0784](https://github.com/tader/switchboard-macos/commit/2be078445504527029eba64aa2afe48c684d4a48))
+* publish appcasts for component-prefixed release tags ([f231cea](https://github.com/tader/switchboard-macos/commit/f231ceafd86f32750113e6d1c2fece36981c3bd6))
+
 ## [0.3.0](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.2.0...switchboard-macos-v0.3.0) (2026-11-24)
 
 
