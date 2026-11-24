@@ -86,8 +86,6 @@ import ServiceManagement
         menu.addItem(.separator())
         item(model.isRunning ? "Stop" : "Start", #selector(toggle), enabled: !model.working)
         item("Restart", #selector(restart), enabled: model.isRunning && !model.working)
-        item("Check for App Updates…", #selector(appUpdates), enabled: appUpdater.canCheckForUpdates)
-        item("Server Updates…", #selector(updates))
         item("Settings…", #selector(showSettings))
         item("Show Logs", #selector(logs))
         menu.addItem(.separator()); item("Quit Switchboard", #selector(quit))
@@ -97,8 +95,6 @@ import ServiceManagement
     @objc func toggle() { if model.isRunning { model.stop() } else { model.start() } }
     @objc func restart() { model.restart() }
     @objc func connections() { model.openConnections() }
-    @objc func appUpdates() { appUpdater.checkForUpdates() }
-    @objc func updates() { showSettings(); model.update("check") }
     @objc func logs() { model.showLogs() }
     @objc func quit() { NSApp.terminate(nil) }
     @objc func showSettings() {
