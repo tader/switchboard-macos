@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.2.0...switchboard-macos-v0.3.0) (2026-11-24)
+
+
+### Features
+
+* add signed GitHub app updates ([d90aa2e](https://github.com/tader/switchboard-macos/commit/d90aa2e133d16fd4f863a417982dc98794d19062))
+* add signed GitHub app updates with installation confirmation ([cfd7ae7](https://github.com/tader/switchboard-macos/commit/cfd7ae78a5ad5c40dcfa37596881f6d1817f31b2))
+* simplify settings and add authenticated account recovery ([fe1932b](https://github.com/tader/switchboard-macos/commit/fe1932bc0376bd944de21f33a2df00b414aa6330))
+* simplify settings and add authenticated account recovery ([758b35e](https://github.com/tader/switchboard-macos/commit/758b35eba80e291c63f6559e647235da4a5c2f82))
+
 ## [0.2.0](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.1.0...switchboard-macos-v0.2.0) (2026-11-20)
 
 
