@@ -5,7 +5,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SPARKLE = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
 
 def generate(arch, tag, directory, tools, key):
-    if arch not in ('arm64', 'x86_64') or not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
+    release = re.fullmatch(r'(?:switchboard-macos-)?v(\d+\.\d+\.\d+)', tag)
+    if arch not in ('arm64', 'x86_64') or release is None:
         raise ValueError('App updates require an architecture and stable version tag')
     if not key or len(base64.b64decode(key.strip(), validate=True)) != 32:
         raise ValueError('SPARKLE_PRIVATE_KEY must contain a base64-encoded 32-byte seed')
@@ -13,7 +14,7 @@ def generate(arch, tag, directory, tools, key):
     derived = subprocess.run(['swift', str(ROOT / 'scripts/sparkle-public-key.swift')], input=key, text=True, capture_output=True, check=True).stdout.strip()
     if derived != public_key:
         raise ValueError('Update signing key does not match the bundled public key')
-    version = tag[1:]
+    version = release.group(1)
     archive = directory / f'Switchboard-{version}-{arch}.zip'
     with zipfile.ZipFile(archive) as bundle:
         info = plistlib.loads(bundle.read('Switchboard.app/Contents/Info.plist'))

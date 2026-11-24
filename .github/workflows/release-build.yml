@@ -89,10 +89,19 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
         run: bash scripts/sign-release.sh '${{ matrix.arch }}'
+      # Build the tagged app, but use publication tooling from this workflow's
+      # revision so a manual retry can repair publishing without moving a tag.
+      - name: Check out current publication tooling
+        if: inputs.sign
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          persist-credentials: false
       - name: Generate and verify signed app update feed
         if: inputs.sign
         env: {SPARKLE_PRIVATE_KEY: '${{ secrets.SPARKLE_PRIVATE_KEY }}', TAG: '${{ inputs.tag }}'}
-        run: python3 scripts/publish-appcast.py '${{ matrix.arch }}' --tag "$TAG"
+        run: python3 .release-tools/scripts/publish-appcast.py '${{ matrix.arch }}' --tag "$TAG"
       - name: Publish verified release assets
         env: {GH_TOKEN: '${{ github.token }}', TAG: '${{ inputs.tag }}', SIGNED: '${{ inputs.sign }}'}
         run: |

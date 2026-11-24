@@ -21,7 +21,7 @@ class UpdateFeedTests(unittest.TestCase):
         self.tools = ROOT / '.build/artifacts/sparkle/Sparkle/bin'
 
     def test_prereleases_and_invalid_keys_are_rejected(self):
-        for tag in ['v1.0.0-dev.1', 'v1.0', '../escape']:
+        for tag in ['v1.0.0-dev.1', 'switchboard-macos-v1.0.0-dev.1', 'other-v1.0.0', 'v1.0', '../escape']:
             with self.assertRaises(ValueError): publisher.generate('arm64', tag, self.directory, self.tools, self.key)
         for key in ['', 'invalid', base64.b64encode(bytes(16)).decode()]:
             with self.assertRaises(ValueError): publisher.generate('arm64', 'v1.0.0', self.directory, self.tools, key)
@@ -50,7 +50,10 @@ class UpdateFeedTests(unittest.TestCase):
         subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], check=True, capture_output=True)
         archive = self.directory / f'Switchboard-1.0.1-{arch}.zip'
         subprocess.run(['/usr/bin/ditto', '-c', '-k', '--keepParent', str(app), str(archive)], check=True)
-        feed = publisher.generate(arch, 'v1.0.1', self.directory, self.tools, self.key)
+        for tag in ['v1.0.1', 'switchboard-macos-v1.0.1']:
+            feed = publisher.generate(arch, tag, self.directory, self.tools, self.key)
+            enclosure = ET.parse(feed).find('./channel/item/enclosure')
+            self.assertEqual(enclosure.get('url'), f'https://github.com/tader/switchboard-macos/releases/download/{tag}/{archive.name}')
         self.assertTrue(feed.exists())
         enclosure = ET.parse(feed).find('./channel/item/enclosure')
         signature = enclosure.get(publisher.SPARKLE + 'edSignature')
