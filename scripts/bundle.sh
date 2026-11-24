@@ -13,6 +13,7 @@ cat > "$output/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>nl.tader.Switchboard</string>
+<key>CFBundleIconFile</key><string>AppIcon.icns</string>
 <key>CFBundleName</key><string>Switchboard</string>
 <key>CFBundleDisplayName</key><string>Switchboard</string>
 <key>CFBundleExecutable</key><string>SwitchboardMenu</string>
@@ -24,6 +25,7 @@ cat > "$output/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+cp Assets/AppIcon.icns "$output/Contents/Resources/AppIcon.icns"
 cp README.md "$output/Contents/Resources/README.md"
 # No signing identity is assumed. This is explicitly a development build.
 /usr/bin/ditto -c -k --keepParent "$output" ".dist/Switchboard-$version-$arch-unsigned.zip"
