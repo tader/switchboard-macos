@@ -18,6 +18,19 @@ public struct RuntimeManifest: Codable, Equatable, Sendable {
         guard origin == "tader/switchboard", version == expectedVersion, revision == expectedRevision, revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil, `protocol` == 1, platform == "darwin", arch == expectedArch, ["arm64", "x64"].contains(arch), archive == "switchboard-runtime-darwin-\(arch).tar.gz", sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { throw ManagerError.invalid("This release is not a compatible macOS runtime.") }
     }
 }
+public struct TransferProgress: Sendable {
+    public let received: Int64
+    public let total: Int64?
+    public var stage: String? = nil
+}
+private final class TransferDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    let report: @Sendable (TransferProgress) -> Void
+    init(_ report: @escaping @Sendable (TransferProgress) -> Void) { self.report = report }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        report(TransferProgress(received: totalBytesWritten, total: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil))
+    }
+}
 public enum RuntimeInstaller {
     #if arch(arm64)
     public static let arch = "arm64"
@@ -27,9 +40,10 @@ public enum RuntimeInstaller {
     static func checkedURL(_ url: URL) throws {
         guard url.scheme == "https", ["github.com", "api.github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"].contains(url.host ?? ""), url.user == nil, url.password == nil else { throw ManagerError.invalid("Untrusted release origin.") }
     }
-    static func download(_ url: URL) async throws -> Data {
+    static func download(_ url: URL, progress: (@Sendable (TransferProgress) -> Void)? = nil) async throws -> Data {
         try checkedURL(url)
-        let (file, response) = try await URLSession.shared.download(for: URLRequest(url: url, timeoutInterval: 300))
+        let delegate = progress.map { TransferDelegate($0) }
+        let (file, response) = try await URLSession.shared.download(for: URLRequest(url: url, timeoutInterval: 300), delegate: delegate)
         defer { try? FileManager.default.removeItem(at: file) }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, let final = response.url else { throw ManagerError.invalid("The compatible runtime is not published yet. Try again after the core release finishes.") }
         try checkedURL(final)
@@ -43,14 +57,15 @@ public enum RuntimeInstaller {
         guard let release = releases.first(where: { !$0.prerelease && $0.available }) else { throw ManagerError.invalid("No compatible stable runtime is published yet.") }
         return try await install(release: release, statePath: statePath)
     }
-    public static func install(release: RuntimeRelease, statePath: String) async throws -> String {
+    public static func install(release: RuntimeRelease, statePath: String, progress: (@Sendable (TransferProgress) -> Void)? = nil) async throws -> String {
         let commit = try JSONSerialization.jsonObject(with: await download(URL(string: "https://api.github.com/repos/tader/switchboard/commits/\(release.tag)")!)) as? [String: Any]
         guard let revision = commit?["sha"] as? String else { throw ManagerError.invalid("Cannot verify release revision.") }
         let base = "https://github.com/tader/switchboard/releases/download/\(release.tag)/"
         let metadata = try await download(URL(string: base + "runtime-darwin-\(arch).json")!)
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: metadata)
         try manifest.validate(version: release.version, revision: revision, arch: arch)
-        let archive = try await download(URL(string: base + manifest.archive)!)
+        let archive = try await download(URL(string: base + manifest.archive)!, progress: progress)
+        progress?(TransferProgress(received: 0, total: nil, stage: "Verifying and unpacking…"))
         return try extract(archive: archive, manifest: manifest, statePath: statePath, fresh: true)
     }
     public static func inspectTar(_ bytes: Data) throws {

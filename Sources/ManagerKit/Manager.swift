@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import ServiceManagement
 import Combine
+import LocalAuthentication
 
 @MainActor public final class Manager: ObservableObject {
     @Published public var settings: Settings
@@ -24,6 +25,149 @@ import Combine
     @Published public var updateState = ""
     @Published public var loginStatus = "Off"
     @Published public var working = false
+    @Published public var downloadProgress: TransferProgress?
+    private var setupURL: URL?
+    public var preferredRelease: RuntimeRelease? {
+        ReleaseCatalog.resolve(releases, channel: settings.releaseChannel, pin: settings.pinnedRelease)
+    }
+    public func savePreferences(channel: String? = nil, pin: String? = nil, clearPin: Bool = false, startServer: Bool? = nil) {
+        guard !working else { return }
+        var next = settings
+        if let channel { next.releaseChannel = channel }
+        if let pin { next.pinnedRelease = pin }
+        if clearPin { next.pinnedRelease = nil }
+        if let startServer { next.startServer = startServer }
+        do { try next.save(settingsURL); settings = next } catch { self.error = error.localizedDescription }
+    }
+    private func reportProgress(_ progress: TransferProgress) {
+        guard working, ["Downloading runtime…", "Verifying and unpacking…"].contains(phase) else { return }
+        downloadProgress = progress
+        if let stage = progress.stage { phase = stage }
+    }
+    public var installedTag: String? {
+        guard let path = settings.runtimePath, let bytes = try? Data(contentsOf: URL(fileURLWithPath: path).appendingPathComponent("runtime.json")), let manifest = try? JSONDecoder().decode(RuntimeManifest.self, from: bytes) else { return nil }
+        return "v" + manifest.version
+    }
+    public struct LocalAccount: Identifiable, Equatable, Sendable {
+        public let id: String
+        public let username: String
+    }
+    @Published public var accountCapabilities: [String] = []
+    @Published public var accountUsers: [LocalAccount] = []
+    @Published public var accountError: String?
+    @Published public var accountNotice: String?
+    @Published public var accountBusy = false
+    @Published public var wantsRecovery = false
+    private var accountSession = UUID()
+    private var accountRequest: (id: String, action: String)?
+    private var accountTimeout: Task<Void, Never>?
+    // Internal dependency seams let tests verify denial/cancellation without displaying a system prompt.
+    var authenticateRecovery: () async throws -> Bool = {
+        let context = LAContext()
+        context.touchIDAuthenticationAllowableReuseDuration = 0
+        defer { context.invalidate() }
+        return try await context.evaluatePolicy(.deviceOwnerAuthentication,
+            localizedReason: "Recover a Switchboard user's password on this Mac.")
+    }
+    var accountCommandWriter: (([String: Any]) -> Bool)?
+    var accountBrowserOpener: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    public var canContinueSetup: Bool { accountCapabilities.contains("account-setup") || setupURL != nil }
+    public func continueSetup() {
+        guard phase == "Running", !accountBusy else { return }
+        if accountCapabilities.contains("account-setup") { requestAccountAction("account-setup") }
+        else if let setupURL { accountBrowserOpener(setupURL) }
+    }
+    public func beginPasswordRecovery() {
+        guard !working && !accountBusy else { return }
+        accountError = nil; accountNotice = nil; wantsRecovery = true
+        if phase == "Running" { loadRecoveryAccounts() }
+        else { start() }
+    }
+    public func loadRecoveryAccounts() {
+        guard phase == "Running", accountCapabilities.contains("account-users"), !accountBusy else { return }
+        requestAccountAction("account-users")
+    }
+    public func dismissRecovery() { wantsRecovery = false; accountUsers = []; accountNotice = nil }
+    public func recoverPassword(userId: String) {
+        guard phase == "Running", !working, !accountBusy,
+            accountCapabilities.contains("account-recovery"), accountUsers.contains(where: { $0.id == userId }) else { return }
+        accountBusy = true; accountError = nil; accountNotice = nil
+        let session = accountSession
+        Task {
+            do {
+                // Every recovery write is below a fresh OS authentication. No generic send path can send recovery.
+                let authorized = try await authenticateRecovery()
+                guard session == accountSession else { return }
+                guard authorized else {
+                    accountBusy = false; accountError = "Recovery was not authorized. No link was requested."; return
+                }
+                guard session == accountSession, phase == "Running", !working, wantsRecovery,
+                    accountCapabilities.contains("account-recovery"), accountUsers.contains(where: { $0.id == userId }) else {
+                    accountBusy = false; return
+                }
+                let id = UUID().uuidString
+                accountRequest = (id, "account-recovery")
+                guard writeCommand(["action": "account-recovery", "requestId": id, "userId": userId]) else {
+                    finishAccountRequest(error: "Switchboard disconnected. Start it and try again."); return
+                }
+                scheduleAccountTimeout(id)
+            } catch {
+                if session == accountSession { accountBusy = false; accountError = "Recovery was not authorized. No link was requested." }
+            }
+        }
+    }
+    private func requestAccountAction(_ action: String) {
+        guard ["account-users", "account-setup"].contains(action), accountRequest == nil else { return }
+        accountBusy = true; accountError = nil
+        let id = UUID().uuidString; accountRequest = (id, action)
+        guard writeCommand(["action": action, "requestId": id]) else {
+            finishAccountRequest(error: "Switchboard disconnected. Start it and try again."); return
+        }
+        scheduleAccountTimeout(id)
+    }
+    private func scheduleAccountTimeout(_ id: String) {
+        accountTimeout?.cancel()
+        accountTimeout = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(35)) } catch { return }
+            guard self?.accountRequest?.id == id else { return }
+            self?.finishAccountRequest(error: "Switchboard did not respond. Try again.")
+        }
+    }
+    private func finishAccountRequest(error: String? = nil) {
+        accountTimeout?.cancel(); accountTimeout = nil; accountRequest = nil; accountBusy = false; accountError = error
+    }
+    private func resetAccountSession() {
+        accountSession = UUID(); finishAccountRequest(); accountCapabilities = []; accountUsers = []; setupURL = nil
+    }
+    // Correlation prevents late responses from opening links after stop/restart or a different request.
+    func receiveAccountResult(_ message: [String: Any]) {
+        guard phase == "Running", let pending = accountRequest, message["requestId"] as? String == pending.id else { return }
+        if pending.action == "account-recovery" && !wantsRecovery { finishAccountRequest(); return }
+        if let error = message["error"] as? String { finishAccountRequest(error: error); return }
+        guard message["action"] as? String == pending.action else { return }
+        if pending.action == "account-users" {
+            accountUsers = (message["users"] as? [[String: String]] ?? []).compactMap {
+                guard let id = $0["id"], let username = $0["username"] else { return nil }
+                return LocalAccount(id: id, username: username)
+            }
+            finishAccountRequest(); return
+        }
+        guard let value = message["setupUrl"] as? String, let target = validatedAccountURL(value) else {
+            finishAccountRequest(error: "No valid account link was returned. Try again."); return
+        }
+        // Only bootstrap links may be retained for Continue Setup. Recovery links are opened and discarded.
+        if pending.action == "account-setup" { setupURL = target }
+        let recovery = pending.action == "account-recovery"
+        finishAccountRequest()
+        accountBrowserOpener(target)
+        if recovery { accountNotice = "Choose a new password in your browser. The link expires in 10 minutes." }
+    }
+    private func validatedAccountURL(_ value: String) -> URL? {
+        guard let url = URL(string: value), let expected = URL(string: settings.appURL),
+            url.scheme == expected.scheme, url.host == expected.host, url.port == expected.port,
+            url.user == nil, url.password == nil, url.path == "/invite", url.query == nil, url.fragment?.isEmpty == false else { return nil }
+        return url
+    }
     public var onChange: (() -> Void)?
     public var onStopped: (() -> Void)?
     public let settingsURL: URL
@@ -32,7 +176,7 @@ import Combine
     private var poll: Timer?
     private var outputBuffer = Data()
     private var installTask: Task<Void, Never>?
-    var runtimeInstaller: @Sendable (String) async throws -> String = { try await RuntimeInstaller.install(statePath: $0) }
+    var runtimeInstaller: (@Sendable (String) async throws -> String)?
     private var setupOpened = false
     public var isInstalling: Bool { installTask != nil }
     public var isRunning: Bool { supervisor?.isRunning == true }
@@ -62,10 +206,10 @@ import Combine
         error = nil; working = true; phase = "Downloading runtime…"; onChange?()
         let original = settings, file = settingsURL
         installTask = Task {
-            defer { installTask = nil; working = false; phase = "Stopped"; onChange?(); onStopped?() }
+            defer { downloadProgress = nil; installTask = nil; working = false; phase = "Stopped"; onChange?(); onStopped?() }
             do {
                 try original.validate()
-                let download = Task.detached { try await RuntimeInstaller.install(release: release, statePath: original.statePath) }
+                let download = Task.detached { try await RuntimeInstaller.install(release: release, statePath: original.statePath) { progress in Task { @MainActor [weak self = self] in self?.reportProgress(progress) } } }
                 let path = try await withTaskCancellationHandler(operation: { try await download.value }, onCancel: { download.cancel() })
                 try Task.checkCancellation()
                 phase = "Verifying data and selecting runtime…"; onChange?()
@@ -81,7 +225,7 @@ import Combine
         let original = settings
         working = true; phase = "Recovering server lock…"; error = nil; onChange?()
         installTask = Task {
-            defer { installTask = nil; working = false; phase = "Stopped"; onChange?(); onStopped?() }
+            defer { downloadProgress = nil; installTask = nil; working = false; phase = "Stopped"; onChange?(); onStopped?() }
             do {
                 let recovery = Task.detached { try RuntimeSelection().recoverServerLock(settings: original) }
                 let recovered = try await recovery.value
@@ -117,7 +261,7 @@ import Combine
         if proposed.dataPath != settings.dataPath || proposed.statePath != settings.statePath {
             try Relocation.rebaseState(at: URL(fileURLWithPath: proposed.statePath), oldState: settings.statePath, newState: proposed.statePath, oldData: settings.dataPath, newData: proposed.dataPath)
         }
-        next.configured = true; try next.save(settingsURL); settings = next; error = nil
+        try next.save(settingsURL); settings = next; error = nil
     }
     public func cancelInstall() {
         guard let installTask else { return }
@@ -128,7 +272,7 @@ import Combine
         error = nil; working = true; phase = settings.runtimePath == nil ? "Downloading runtime…" : "Starting…"; onChange?()
         installTask = Task {
             defer {
-                installTask = nil
+                installTask = nil; downloadProgress = nil
                 if !isRunning { onStopped?() }
             }
             do {
@@ -137,12 +281,18 @@ import Combine
                 if settings.runtimePath == nil {
                     let state = settings.statePath
                     let installer = runtimeInstaller
-                    let download = Task.detached { try await installer(state) }
+                    let channel = settings.releaseChannel, pin = settings.pinnedRelease
+                    let download = Task.detached { [weak self = self] in
+                        if let installer { return try await installer(state) }
+                        let releases = try await ReleaseCatalog.load()
+                        guard let release = ReleaseCatalog.resolve(releases, channel: channel, pin: pin) else { throw ManagerError.invalid("No compatible release is available for your selection. Check Updates and try again.") }
+                        return try await RuntimeInstaller.install(release: release, statePath: state) { progress in Task { @MainActor in self?.reportProgress(progress) } }
+                    }
                     let runtime = try await withTaskCancellationHandler(operation: { try await download.value }, onCancel: { download.cancel() })
                     try Task.checkCancellation()
                     settings.runtimePath = runtime; settings.configured = true; try settings.save(settingsURL)
                 }
-                try Task.checkCancellation(); try launch()
+                try Task.checkCancellation(); downloadProgress = nil; phase = "Starting…"; onChange?(); try launch()
             } catch is CancellationError { phase = "Stopped"; working = false; onChange?() }
             catch { if !Task.isCancelled { self.error = error.localizedDescription }; phase = "Stopped"; working = false; onChange?() }
         }
@@ -160,17 +310,17 @@ import Combine
         process.currentDirectoryURL = URL(fileURLWithPath: runtime)
         process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "NODE_ENV": "production"]
         process.standardInput = incoming; process.standardOutput = outgoing; process.standardError = FileHandle.nullDevice
-        outputBuffer = Data(); setupOpened = false
+        outputBuffer = Data(); setupOpened = false; resetAccountSession()
         outgoing.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil; return }
             Task { @MainActor [weak self] in self?.receive(data) }
         }
         process.terminationHandler = { [weak self] _ in Task { @MainActor [weak self] in
-            guard let self else { return }; self.poll?.invalidate(); self.poll = nil; self.input = nil; self.supervisor = nil; self.phase = "Stopped"; self.working = false; self.paired = false; self.onChange?(); self.onStopped?()
+            guard let self else { return }; self.poll?.invalidate(); self.poll = nil; self.input = nil; self.supervisor = nil; self.phase = "Stopped"; self.working = false; self.paired = false; self.administratorReady = false; self.resetAccountSession(); self.onChange?(); self.onStopped?()
         } }
         try process.run(); supervisor = process; input = incoming.fileHandleForWriting
-        send(["action": "start", "settings": ["instance": "local-manager", "mode": "runtime", "dataDir": settings.dataPath, "stateDir": settings.statePath, "initialRelease": runtime, "appUrl": settings.appURL, "env": ["SWITCHBOARD_HOST": settings.host, "SWITCHBOARD_PORT": String(settings.port), "SWITCHBOARD_PUBLIC_URL": settings.appURL]]])
+        send(["action": "start", "settings": ["instance": "local-manager", "mode": "runtime", "dataDir": settings.dataPath, "stateDir": settings.statePath, "initialRelease": runtime, "appUrl": settings.appURL, "env": ["SWITCHBOARD_HOST": settings.host, "SWITCHBOARD_PORT": String(settings.port), "SWITCHBOARD_PUBLIC_URL": settings.appURL, "SWITCHBOARD_LOCAL_ACCOUNT_RECOVERY": "1"]]])
         poll = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor [weak self] in self?.send(["action": "status"]) } }
     }
     public func log(_ event: String) {
@@ -191,9 +341,12 @@ import Combine
             if event != "status" && event != "accepted" { log(event) }
             switch event {
             case "started": phase = "Running"; working = false
-                if let url = m["setupUrl"] as? String, !setupOpened, let target = URL(string: url), target.scheme == "http", target.host == URL(string: settings.appURL)?.host, target.port == settings.port { setupOpened = true; NSWorkspace.shared.open(target) }
+                accountCapabilities = m["accountCapabilities"] as? [String] ?? []
+                if wantsRecovery { loadRecoveryAccounts() }
+                if let url = m["setupUrl"] as? String, !setupOpened, let target = URL(string: url), target.scheme == "http", target.host == URL(string: settings.appURL)?.host, target.port == settings.port, target.path == "/invite", target.user == nil, target.password == nil, target.fragment?.isEmpty == false { setupOpened = true; setupURL = target; NSWorkspace.shared.open(target) }
+            case "account-result": receiveAccountResult(m)
             case "status":
-                administratorReady = m["ready"] as? Bool == true; paired = m["paired"] as? Bool == true; attention = m["attention"] as? Int ?? 0; eligible = m["eligible"] as? Bool == true
+                administratorReady = m["ready"] as? Bool == true; if administratorReady { setupURL = nil }; paired = m["paired"] as? Bool == true; attention = m["attention"] as? Int ?? 0; eligible = m["eligible"] as? Bool == true
                 updateState = (m["job"] as? [String: Any])?["state"] as? String ?? ""
             case "paired": paired = true
             case "finishing": phase = "Finishing update before quitting…"
@@ -206,10 +359,16 @@ import Combine
         }
     }
     private func send(_ value: [String: Any]) {
-        guard let input, let bytes = try? JSONSerialization.data(withJSONObject: value) else { return }
-        do { try input.write(contentsOf: bytes + Data([10])) } catch { self.error = "The local manager disconnected." }
+        // Account recovery can only be written by recoverPassword after fresh OS authentication.
+        guard value["action"] as? String != "account-recovery" else { return }
+        _ = writeCommand(value)
     }
-    public func stop() { if isRunning { working = true; phase = "Stopping…"; send(["action": "quit"]); onChange?() } else if isInstalling { cancelInstall() } else { onStopped?() } }
+    @discardableResult private func writeCommand(_ value: [String: Any]) -> Bool {
+        if let accountCommandWriter { return accountCommandWriter(value) }
+        guard let input, let bytes = try? JSONSerialization.data(withJSONObject: value) else { return false }
+        do { try input.write(contentsOf: bytes + Data([10])); return true } catch { self.error = "The local manager disconnected."; return false }
+    }
+    public func stop() { resetAccountSession(); if isRunning { working = true; phase = "Stopping…"; send(["action": "quit"]); onChange?() } else if isInstalling { cancelInstall() } else { onStopped?() } }
     public func restart() { onStopped = { [weak self] in self?.onStopped = nil; self?.start() }; stop() }
     public func update(_ action: String) { if action == "check" { checkReleases(); return }; guard ["check", "update", "cancel"].contains(action) else { return }; send(["action": action]) }
     public func open() { if phase == "Running", let url = URL(string: settings.browserURL) { NSWorkspace.shared.open(url) } else { start() } }

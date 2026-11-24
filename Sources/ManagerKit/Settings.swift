@@ -15,6 +15,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var startServer = true
     public var configured = false
     public var runtimePath: String?
+    public var releaseChannel: String?
+    public var pinnedRelease: String?
     public init() {}
     public static func canonical(_ path: String) throws -> String {
         guard path.hasPrefix("/"), !path.contains("\0") else { throw ManagerError.invalid("Choose an absolute folder path.") }

@@ -6,9 +6,9 @@ The app ZIPs published on [GitHub Releases](https://github.com/tader/switchboard
 
 ## Set up
 
-Download the archive for your Mac from this repository's releases, extract `Switchboard.app`, and place it in Applications. Open the app and review the folders and port in Settings. Choose **Set Up Switchboard**. The app downloads and verifies a compatible stable core runtime, starts the server, and automatically opens its one-time administrator setup page in your default browser.
+Download the archive for your Mac from this repository's releases, extract `Switchboard.app`, and place it in Applications. Open the app; the recommended folders and network settings are ready to use. Choose **Set Up Switchboard**. The app downloads and verifies a compatible stable core runtime, starts the server, and automatically opens its one-time administrator setup page in your default browser.
 
-Create your administrator password in the browser. The app detects completion and pairs the updater automatically. No password or token needs to be entered in the native app. Runtime availability depends on the core release finishing publication; if it is not ready, retry after that release's assets have appeared.
+Choose your administrator username and password in the browser. The app detects completion and pairs the updater automatically. No password or token needs to be entered in the native app. Runtime availability depends on the core release finishing publication; if it is not ready, retry after that release's assets have appeared.
 
 Defaults:
 
@@ -25,6 +25,16 @@ Defaults:
 
 Existing compatible data is adopted without replacing its database or resetting its administrator. Stop any existing server and disable its previous automatic launcher before adopting that folder. An occupied port or an active data lease is an error; the app does not kill an unrelated process or start a second server on the same data.
 
+## Account setup and password recovery
+
+While initial setup is incomplete, **Continue Account Setup** opens the browser setup form again. New installations can choose a username; existing accounts keep theirs. If your server is too old to refresh the link, restart Switchboard to get a fresh setup link.
+
+In Settings → Account, choose **Recover Password…**, select an enabled local account, then **Authenticate & Recover**. If stopped, use **Start & Continue to Recovery…**. Your Mac requires fresh device-owner authentication, such as Touch ID or your Mac login password, before the app requests a recovery link. You enter the new Switchboard password only in your browser.
+
+The link expires after 10 minutes and works once. Completing recovery signs the selected user out of existing browser sessions while preserving their username, role, connections and data. Disabled users and peer-shadow accounts are excluded. A server version without this capability shows an update explanation.
+
+This feature trusts the macOS account owning the local installation to recover its users. It communicates through private parent–child pipes, not an HTTP recovery endpoint. Authentication helps protect an unlocked Mac from casual misuse; it does not protect against malware controlling the owning account or a compromised manager. Recovery links are not saved in settings or written to logs.
+
 ## Menu bar
 
 Left-click the icon to open a running server in your default browser. If stopped or installing, left-click opens setup/settings. Right-click for **Open**, **Start/Stop**, **Restart**, **Updates**, **Settings**, **Show Logs** and **Quit**.
@@ -35,7 +45,7 @@ When a connection reports an explicit terminal sign-in failure, the menu bar sho
 
 ## Settings and startup
 
-Stop the server before changing paths, listen address, port or browser URL. Paths are resolved through symbolic links; the data and updater folders cannot overlap. If relocating existing data or updater state, choose **Copy and verify**. The original folders are retained. The app verifies file contents, rebases known release/journal paths in the copied state and discards stale process metadata before selecting the copy. External symbolic links are refused for relocation.
+Choose **Advanced…** for folders, network settings, version pinning and maintenance. Stop the server before changing paths, listen address, port or browser URL. Paths are resolved through symbolic links; the data and updater folders cannot overlap. If relocating existing data or updater state, choose **Copy and verify folders when moving data**. The original folders are retained. The app verifies file contents, rebases known release/journal paths in the copied state and discards stale process metadata before selecting the copy. External symbolic links are refused for relocation.
 
 The listen address can be a local IP address or `localhost`. Wildcard `0.0.0.0` and `::` expose the server to other interfaces while the manager uses loopback control. Use an appropriate firewall when choosing a network-facing address. The browser URL is configurable independently.
 
@@ -45,7 +55,7 @@ Settings are owner-readable only. The manager keeps its narrow updater credentia
 
 ## Updates, backups and recovery
 
-Choose **Updates** or **Check for Updates** in Settings, then select a version and choose **Install / Reinstall** or **Install Latest Stable**. These actions do not require a running server or pairing. Prepared runtime assets must be published for the app’s architecture. Installation downloads fresh files, checks a disposable database copy, preserves a full data snapshot, and leaves the server stopped. Enable **Include prereleases** to see prereleases. **Cancel** is available during download and preparation; selection commits finish before Quit.
+Settings → Updates follows **Stable — Recommended** by default. Choose **Development — Early releases** to follow published prereleases with compatible macOS runtime assets. **Check for Updates** resolves the latest compatible release; installation starts only when you choose it. To select a particular version, open **Advanced…**, enable **Pin a specific version**, and choose a release. Disable pinning to return to your channel. Download progress shows actual bytes and a percentage when the total size is available, followed by verification and installation stages. Installation preserves your data and leaves Switchboard stopped. Cancellation is available before the final selection commit.
 
 Backups and the owner-only `journal.json`, `history/` and `last-success.json` are in your updater folder; **Show Logs** opens that folder. Keep independent off-device backups of the entire data folder and updater folder while stopped. Include `secret.key`, the database, installed extensions, extension state and browser profiles together. Snapshots contain credentials; keep them private and leave room for full copies.
 
@@ -59,13 +69,13 @@ Run `just release` to build for this Mac, or `just release arm64` / `just releas
 
 ## Install or repair without a running server
 
-Open Settings → Server updates and choose **Check for Updates**. Select a version and choose **Install / Reinstall**, or **Install Latest Stable**. Enable **Include prereleases** to select a published prerelease. Releases require compatible prepared runtime assets. Use **More Versions** for older releases.
+Open Settings → Updates and choose **Check for Updates**, then install the selected release. For older versions, open **Advanced…** and enable **Pin a specific version**. Use **Load Older Versions** to browse earlier releases. **Reinstall Selected Release** is under Advanced → Maintenance.
 
-These controls work without pairing or a running Switchboard. **Stop and Install** stops the owned server first. Installation leaves the server stopped. Reinstallation downloads a fresh runtime, including the architecture required by the app, and preserves the old runtime. Existing data is backed up under the updater folder and migrations are checked against a disposable database copy; incompatible downgrades are refused. Start Switchboard separately when ready. Native installation does not automatically restore data after a failed Start; preserve the current data and backups before deciding on recovery.
+These controls work without pairing or a running Switchboard. **Stop & Update** stops the owned server first. Installation leaves the server stopped. Reinstallation downloads a fresh runtime, including the architecture required by the app, and preserves the old runtime. Existing data is backed up under the updater folder and migrations are checked against a disposable database copy; incompatible downgrades are refused. Start Switchboard separately when ready. Native installation does not automatically restore data after a failed Start; preserve the current data and backups before deciding on recovery.
 
 If runtime metadata is missing, incompatible, or damaged, choose another release or reinstall. An active server lease or unresolved updater recovery journal must be resolved before runtime selection; the app never deletes those records to bypass recovery.
 
-If installation reports **A server lock remains**, choose **Recover Server Lock…** in Settings → Server updates. The app checks the server and updater’s exclusive SQLite leases, then moves the advisory `.server-lock` record into the updater folder’s owner-only `recovered-locks/` directory. This also handles malformed records, renamed hosts, and reused process IDs. It does not signal a process or delete the lease databases. Recovery is refused while either lease is held; stop the owning Switchboard instance first. After recovery, retry installation or Start.
+If installation reports **A server lock remains**, choose **Recover Server Lock…** in Settings → Advanced → Maintenance. The app checks the server and updater’s exclusive SQLite leases, then moves the advisory `.server-lock` record into the updater folder’s owner-only `recovered-locks/` directory. This also handles malformed records, renamed hosts, and reused process IDs. It does not signal a process or delete the lease databases. Recovery is refused while either lease is held; stop the owning Switchboard instance first. After recovery, retry installation or Start.
 
 Installation snapshots preserve symbolic links whose targets stay inside the data folder, rebasing absolute internal links so the backup remains usable if the original folder moves. Chromium’s transient `SingletonLock`, `SingletonCookie`, and `SingletonSocket` links are omitted from snapshots; the original links are left untouched. Persistent links outside the data folder are refused with the relative path of the offending link: move the target inside the data folder before retrying. Folder relocation retains its separate restriction on symbolic links.
 

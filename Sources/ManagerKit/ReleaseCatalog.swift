@@ -8,6 +8,11 @@ public struct RuntimeRelease: Identifiable, Sendable, Equatable {
     public var version: String { String(tag.dropFirst()) }
 }
 public enum ReleaseCatalog {
+    public static func resolve(_ releases: [RuntimeRelease], channel: String?, pin: String?) -> RuntimeRelease? {
+        if let pin { return releases.first { $0.tag == pin && $0.available } }
+        return releases.first { $0.available && $0.prerelease == (channel == "development") }
+    }
+
     public static func load(page: Int = 1) async throws -> [RuntimeRelease] {
         let bytes = try await RuntimeInstaller.download(URL(string: "https://api.github.com/repos/tader/switchboard/releases?per_page=100&page=\(page)")!)
         return try parse(bytes)
