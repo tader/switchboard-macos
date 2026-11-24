@@ -64,3 +64,21 @@ If Apple returns Invalid, use the submission ID printed in the workflow with `xc
 The separately downloaded server runtime has its own distribution/signing requirements. Notarizing the native app does not notarize those runtime assets.
 
 References: [Release Please outputs and token behavior](https://github.com/googleapis/release-please-action), [Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/), [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [Command-line notarization](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
+
+
+## App-update signing
+
+The app uses pinned Sparkle 2.10.1 with signed per-architecture feeds and archives. `scripts/bundle.sh` embeds the universal framework and disables live updating in unsigned bundles. `scripts/sign-release.sh` signs Sparkle's helpers inside out, enables app updating, notarizes, staples and verifies the app. `scripts/publish-appcast.py` generates a feed for each signed ZIP, verifies both signatures, and checks the private key matches the bundled public key before publication. The release workflow refuses signed releases without `SPARKLE_PRIVATE_KEY`.
+
+One-time configuration, after the maintainer authorizes storing the update key in GitHub Actions:
+
+```sh
+swift package resolve
+python3 scripts/configure-app-updates.py
+```
+
+The helper creates a dedicated Keychain account `nl.tader.Switchboard`, exports the seed only to an owner-only temporary file, sends it through stdin to the repository's `SPARKLE_PRIVATE_KEY` secret, and deletes the temporary export. Only `Assets/update-public-key.txt` is added to source control. The helper refuses to overwrite an existing secret; key rotation requires an explicit migration. Keep a secure backup of this Keychain key. Never put its private seed in a commit, command argument, CI log or artifact.
+
+Signed releases publish `appcast-arm64.xml` and `appcast-x86_64.xml` with their signed ZIPs. Their permanent discovery URLs are the repository's HTTPS `releases/latest/download/` URLs. Each feed references the immutable version-specific GitHub asset URL. No updater feed is emitted for unsigned builds. A brief unavailable period can occur while a newly created release is still uploading its assets; clients retain their current app and can retry.
+
+The initial updater-bearing release needs a manual installation. Default policy is daily automatic checks with confirmation before installation; silent installation and system profiling are disabled. Keep application and server updates distinct.

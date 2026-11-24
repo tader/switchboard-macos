@@ -4,14 +4,15 @@ import ServiceManagement
 
 public struct SettingsView: View {
     @ObservedObject var model: Manager
+    @ObservedObject var appUpdater: AppUpdater
     @State private var draft: Settings
     @State private var advanced = false
     @State private var copyFolders = false
     @State private var confirmLockRecovery = false
     @State private var dirty = false
-    public init(model: Manager) { self.model = model; _draft = State(initialValue: model.settings) }
-    init(model: Manager, initiallyAdvanced: Bool) {
-        self.model = model; _draft = State(initialValue: model.settings); _advanced = State(initialValue: initiallyAdvanced)
+    public init(model: Manager, appUpdater: AppUpdater? = nil) { self.model = model; self.appUpdater = appUpdater ?? AppUpdater(enabled: false); _draft = State(initialValue: model.settings) }
+    init(model: Manager, initiallyAdvanced: Bool, appUpdater: AppUpdater? = nil) {
+        self.model = model; self.appUpdater = appUpdater ?? AppUpdater(enabled: false); _draft = State(initialValue: model.settings); _advanced = State(initialValue: initiallyAdvanced)
     }
     public var body: some View {
         VStack(spacing: 0) {
@@ -105,7 +106,17 @@ public struct SettingsView: View {
                     if model.loginStatus == "Approval required" { Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() } }
                 }
             }
-            section("Updates") {
+            section("App updates") {
+                Text("Switchboard for macOS · \(appUpdater.version)").textSelection(.enabled)
+                if let message = appUpdater.availabilityMessage {
+                    Text(message).font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
+                } else {
+                    Toggle("Check for app updates automatically", isOn: Binding(get: { appUpdater.automaticallyChecksForUpdates }, set: { appUpdater.setAutomaticallyChecksForUpdates($0) }))
+                    Text("You’ll be asked before installing. Installing an app update stops your local server and reopens the app.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
+                    Button("Check for App Updates…") { appUpdater.checkForUpdates() }.disabled(!appUpdater.canCheckForUpdates)
+                }
+            }
+            section("Server updates") {
                 if let installed = model.installedTag { Text("Installed version: \(installed)") }
                 else { Text(model.settings.runtimePath == nil ? "Switchboard is not installed yet." : "The installation needs repair. Open Advanced to reinstall.") }
                 if let pin = model.settings.pinnedRelease {

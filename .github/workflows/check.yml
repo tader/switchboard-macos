@@ -35,6 +35,9 @@ jobs:
           SWITCHBOARD_TEST_RUNTIME_ASSETS: ${{ runner.temp }}/core
           SWITCHBOARD_UI_SNAPSHOT_DIR: ${{ runner.temp }}/ui
       - run: bash scripts/bundle.sh '${{ matrix.arch }}'
+      - run: python3 scripts/test-app-update-configuration.py
+      - run: python3 scripts/test-app-updates.py
+        env: {SWITCHBOARD_TEST_APP_ARCH: '${{ matrix.arch }}'}
       - name: Exercise the relocated packaged app
         run: python3 scripts/smoke-app.py --app '.dist/${{ matrix.arch }}/Switchboard.app' --runtime "$RUNNER_TEMP/core/runtime" --seed-data "$RUNNER_TEMP/core/seed"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

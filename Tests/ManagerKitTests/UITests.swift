@@ -23,7 +23,7 @@ final class UITests: XCTestCase {
                 let window = NSWindow(contentRect: NSRect(x:0,y:0,width:width,height:700),styleMask:[.titled,.closable],backing:.buffered,defer:false)
                 window.isReleasedWhenClosed = false
                 window.appearance = NSAppearance(named:appearance)
-                let content = mode.hasPrefix("recovery") ? AnyView(AccountRecoveryView(model: manager)) : AnyView(SettingsView(model: manager, initiallyAdvanced: mode == "advanced"))
+                let content = mode.hasPrefix("recovery") ? AnyView(AccountRecoveryView(model: manager)) : AnyView(SettingsView(model: manager, initiallyAdvanced: mode == "advanced", appUpdater: AppUpdater(previewVersion: "1.0.0")))
                 let host = NSHostingView(rootView: content.frame(width: CGFloat(width), height: 700).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme,name == "dark" ? .dark : .light)); host.appearance = window.appearance; window.contentView=host
                 window.contentView?.layoutSubtreeIfNeeded(); window.display()
                 try await Task.sleep(for: .milliseconds(100))

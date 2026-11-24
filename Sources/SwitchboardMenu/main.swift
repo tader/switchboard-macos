@@ -7,6 +7,7 @@ import ServiceManagement
     var statusItem: NSStatusItem!
     var window: NSWindow?
     var model: Manager!
+    var appUpdater: AppUpdater!
     var terminating = false
     var smokeTimer: Timer?
     var smokeTicks = 0
@@ -28,6 +29,10 @@ import ServiceManagement
         let custom = args.firstIndex(of: "--settings-file").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         let url = custom.map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Switchboard/settings.json")
         model = Manager(settingsURL: url)
+        appUpdater = AppUpdater(enabled: !args.contains("--smoke-report"))
+        appUpdater.prepareForInstallation = { [weak self] resume in
+            self?.model.prepareForAppUpdate(resume) ?? false
+        }
         if let index = args.firstIndex(of: "--appearance"), index + 1 < args.count { NSApp.appearance = NSAppearance(named: args[index + 1] == "dark" ? .darkAqua : .aqua) }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self; statusItem.button?.action = #selector(clicked)
@@ -81,7 +86,8 @@ import ServiceManagement
         menu.addItem(.separator())
         item(model.isRunning ? "Stop" : "Start", #selector(toggle), enabled: !model.working)
         item("Restart", #selector(restart), enabled: model.isRunning && !model.working)
-        item("Updates…", #selector(updates))
+        item("Check for App Updates…", #selector(appUpdates), enabled: appUpdater.canCheckForUpdates)
+        item("Server Updates…", #selector(updates))
         item("Settings…", #selector(showSettings))
         item("Show Logs", #selector(logs))
         menu.addItem(.separator()); item("Quit Switchboard", #selector(quit))
@@ -91,13 +97,14 @@ import ServiceManagement
     @objc func toggle() { if model.isRunning { model.stop() } else { model.start() } }
     @objc func restart() { model.restart() }
     @objc func connections() { model.openConnections() }
+    @objc func appUpdates() { appUpdater.checkForUpdates() }
     @objc func updates() { showSettings(); model.update("check") }
     @objc func logs() { model.showLogs() }
     @objc func quit() { NSApp.terminate(nil) }
     @objc func showSettings() {
         model.refreshLoginStatus()
         if window == nil {
-            let view = SettingsView(model: model)
+            let view = SettingsView(model: model, appUpdater: appUpdater)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 700), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
             window.title = "Switchboard"; window.contentView = NSHostingView(rootView: view); window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 460, height: 480); if let index = CommandLine.arguments.firstIndex(of: "--window-width"), index + 1 < CommandLine.arguments.count, let width = Double(CommandLine.arguments[index + 1]) { window.setContentSize(NSSize(width: max(460, width), height: 700)) }; window.center(); self.window = window
         }
