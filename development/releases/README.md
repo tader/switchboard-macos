@@ -82,3 +82,10 @@ The helper creates a dedicated Keychain account `nl.tader.Switchboard`, exports 
 Signed releases publish `appcast-arm64.xml` and `appcast-x86_64.xml` with their signed ZIPs. Their permanent discovery URLs are the repository's HTTPS `releases/latest/download/` URLs. Each feed references the immutable version-specific GitHub asset URL. No updater feed is emitted for unsigned builds. A brief unavailable period can occur while a newly created release is still uploading its assets; clients retain their current app and can retry.
 
 The initial updater-bearing release needs a manual installation. Default policy is daily automatic checks with confirmation before installation; silent installation and system profiling are disabled. Keep application and server updates distinct.
+
+
+### Retrying a publication failure
+
+Native tags use Release Please's `switchboard-macos-v<version>` format; the publisher also accepts legacy `v<version>` tags. Archive filenames and bundle versions use only the semantic version, while download URLs retain the exact tag.
+
+After merging a publication-tooling fix, dispatch `release-build.yml` from `main` with the existing release tag and `sign=true`. The workflow builds the original tagged app and uses publication tooling from the workflow revision. It does not move the release tag. Signing, notarization, key matching and feed/archive verification still run before uploading assets.
