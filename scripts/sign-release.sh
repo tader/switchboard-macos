@@ -35,6 +35,21 @@ import shlex, subprocess, sys
 subprocess.run(["security", "list-keychains", "-d", "user", "-s", sys.argv[2], *shlex.split(open(sys.argv[1]).read())], check=True)
 SEARCH
 app=".dist/$arch/Switchboard.app"
+# Fail closed until the dedicated update-signing identity is configured.
+python3 - "$app/Contents/Info.plist" <<'KEY'
+import base64, plistlib, sys
+info = plistlib.load(open(sys.argv[1], 'rb'))
+key = info.get('SUPublicEDKey', '')
+if len(base64.b64decode(key, validate=True)) != 32:
+    sys.exit('A valid Sparkle public key is required before signing a release.')
+KEY
+# Updates are enabled only in Developer ID releases, never unsigned CI/local bundles.
+/usr/bin/plutil -replace SUAppUpdatesEnabled -bool YES "$app/Contents/Info.plist"
+# Re-sign Sparkle from the inside out with the application's identity for library validation.
+framework="$app/Contents/Frameworks/Sparkle.framework"
+for component in "$framework/Versions/B/Autoupdate" "$framework/Versions/B/Updater.app" "$framework/Versions/B/XPCServices/Downloader.xpc" "$framework/Versions/B/XPCServices/Installer.xpc" "$framework"; do
+  codesign --force --options runtime --timestamp --preserve-metadata=entitlements --keychain "$keychain" --sign "$SIGNING_IDENTITY" "$component"
+done
 codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$SIGNING_IDENTITY" "$app"
 version=$(/usr/bin/plutil -extract version raw version.json)
 zip=".dist/Switchboard-$version-$arch.zip"
@@ -50,7 +65,7 @@ if result.get("status") != "Accepted":
 RESULT
 xcrun stapler staple "$app"
 xcrun stapler validate "$app"
-codesign --verify --strict "$app"
+codesign --verify --deep --strict "$app"
 spctl --assess --type execute "$app"
 ditto -c -k --keepParent "$app" "$zip"
 rm .dist/*-unsigned.zip

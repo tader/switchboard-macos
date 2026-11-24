@@ -369,6 +369,13 @@ import LocalAuthentication
         do { try input.write(contentsOf: bytes + Data([10])); return true } catch { self.error = "The local manager disconnected."; return false }
     }
     public func stop() { resetAccountSession(); if isRunning { working = true; phase = "Stopping…"; send(["action": "quit"]); onChange?() } else if isInstalling { cancelInstall() } else { onStopped?() } }
+    /// Defer Sparkle's relaunch until owned processes and any install cleanup have finished.
+    public func prepareForAppUpdate(_ completion: @escaping () -> Void) -> Bool {
+        guard isRunning || isInstalling else { return false }
+        onStopped = { [weak self] in self?.onStopped = nil; completion() }
+        stop()
+        return true
+    }
     public func restart() { onStopped = { [weak self] in self?.onStopped = nil; self?.start() }; stop() }
     public func update(_ action: String) { if action == "check" { checkReleases(); return }; guard ["check", "update", "cancel"].contains(action) else { return }; send(["action": action]) }
     public func open() { if phase == "Running", let url = URL(string: settings.browserURL) { NSWorkspace.shared.open(url) } else { start() } }

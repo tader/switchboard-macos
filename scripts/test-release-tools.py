@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import plistlib
 import unittest
 from unittest.mock import patch
 
@@ -62,7 +63,9 @@ class SigningTests(unittest.TestCase):
             shim.chmod(0o700)
             for command in ["security", "uuidgen", "codesign", "ditto", "xcrun", "spctl"]:
                 (binary / command).symlink_to(shim)
-            (root / ".dist/arm64/Switchboard.app").mkdir(parents=True)
+            app = root / ".dist/arm64/Switchboard.app"
+            (app / "Contents").mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"SUAppUpdatesEnabled": False, "SUPublicEDKey": base64.b64encode(bytes(32)).decode()}))
             unsigned = root / ".dist/Switchboard-1.0.0-arm64-unsigned.zip"
             unsigned.touch()
             (root / "version.json").write_text('{"version":"1.0.0"}')
@@ -81,6 +84,11 @@ class SigningTests(unittest.TestCase):
                 self.assertFalse(unsigned.exists())
                 self.assertIn(["xcrun", "stapler", "validate", ".dist/arm64/Switchboard.app"], calls)
                 self.assertIn(["spctl", "--assess", "--type", "execute", ".dist/arm64/Switchboard.app"], calls)
+                signed = [call[-1] for call in calls if call[0] == "codesign" and "--sign" in call]
+                self.assertEqual(signed[-1], ".dist/arm64/Switchboard.app")
+                self.assertTrue(signed[-2].endswith("Sparkle.framework"))
+                self.assertTrue(any(path.endswith("Downloader.xpc") for path in signed))
+                self.assertTrue(plistlib.loads((app / "Contents/Info.plist").read_bytes())["SUAppUpdatesEnabled"])
             else:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertTrue(unsigned.exists())

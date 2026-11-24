@@ -61,7 +61,15 @@ Backups and the owner-only `journal.json`, `history/` and `last-success.json` ar
 
 Before normal operation opens, startup failure automatically restores the complete snapshot and previous runtime. After opening, automatic restoration is disabled because it could discard new writes or repeat external actions. If Settings shows `recovery-required`, stop the app and preserve both current folders before making a recovery decision. The journal identifies the matching previous runtime and snapshot. Restore a complete snapshot to a new data folder, then select that folder while stopped; retain the failed data and original journal. Select a compatible runtime using the recorded `current.json` release pointer only as an explicit owner recovery step, and archive the active journal after recording that decision. Never combine a database with another snapshot's encryption key. External effects cannot be undone by restoring local files.
 
-The app does not update its own binary in version one. Install a new native app release separately; server updates use the managed updater.
+## App updates
+
+Signed releases check GitHub for new stable macOS app releases automatically, normally once a day. You are asked before downloading and installing an update; app updates are never installed silently. Use **Check for App Updates…** from the menu bar or Settings → App updates to check immediately. Turn off **Check for app updates automatically** if you prefer manual checks.
+
+Installing an app update stops the owned server gracefully and waits for installation cleanup or an active server update to finish. The app then updates and reopens. Your startup preference determines whether the server starts again. Your accounts, data folders and server release preference are retained.
+
+App updates are independent of **Server updates**, which chooses Stable, Development or a pinned server runtime. The app checks only stable releases appropriate for its own architecture. Sparkle verifies signed feeds and update archives before extraction, alongside the release's Developer ID signature and notarization. Anonymous system profiling and silent automatic installation are disabled.
+
+Install the first signed app release containing this updater manually; older app versions cannot update themselves. Unsigned local/CI builds keep app updates disabled. If an update check fails while offline or during release publication, retry later; the installed app stays available.
 
 ## Build locally
 

@@ -6,7 +6,11 @@ swift build -c release --arch "$arch"
 bin=$(swift build -c release --arch "$arch" --show-bin-path)
 version=$(/usr/bin/plutil -extract version raw version.json)
 output=".dist/$arch/Switchboard.app"
-mkdir -p "$output/Contents/MacOS" "$output/Contents/Resources"
+mkdir -p "$output/Contents/MacOS" "$output/Contents/Resources" "$output/Contents/Frameworks"
+framework=".build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+/usr/bin/ditto "$framework" "$output/Contents/Frameworks/Sparkle.framework"
+public_key=""
+if [ -f Assets/update-public-key.txt ]; then public_key=$(cat Assets/update-public-key.txt); fi
 cp "$bin/SwitchboardMenu" "$output/Contents/MacOS/SwitchboardMenu"
 cat > "$output/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -20,6 +24,16 @@ cat > "$output/Contents/Info.plist" <<PLIST
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$version</string>
 <key>CFBundleVersion</key><string>$version</string>
+<key>SUFeedURL</key><string>https://github.com/tader/switchboard-macos/releases/latest/download/appcast-$arch.xml</string>
+<key>SUPublicEDKey</key><string>$public_key</string>
+<key>SUAppUpdatesEnabled</key><false/>
+<key>SUEnableAutomaticChecks</key><true/>
+<key>SUAutomaticallyUpdate</key><false/>
+<key>SUAllowsAutomaticUpdates</key><false/>
+<key>SUEnableSystemProfiling</key><false/>
+<key>SUVerifyUpdateBeforeExtraction</key><true/>
+<key>SURequireSignedFeed</key><true/>
+<key>SUSignedFeedFailureExpirationInterval</key><integer>0</integer>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
