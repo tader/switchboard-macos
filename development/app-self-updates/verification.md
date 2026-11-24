@@ -16,8 +16,8 @@ Release automation derives and compares the signing identity with the bundled pu
 - Two configuration safety tests passed using mocked Keychain/GitHub operations; secret transport uses stdin and temporary exports are removed.
 - The updated app was bundled with its framework and portable rpath. Native settings light/dark renders were generated for inspection.
 
-## Remaining setup and limits
+## Signing setup and limits
 
-Production key setup is pending specific maintainer approval to export a new dedicated Keychain key to the repository's `SPARKLE_PRIVATE_KEY` Actions secret. Automatic review rejected that credential egress. No production key has been created or uploaded; no placeholder public key is committed. Signed release publication fails closed until configured. Only disposable local test keys were used for signing tests.
+The maintainer explicitly approved production signing setup. The dedicated key is retained in the macOS login Keychain, and its private seed is configured as the repository’s `SPARKLE_PRIVATE_KEY` Actions secret. Only `Assets/update-public-key.txt` is committed. The public key matches the Keychain identity and a signing/verification round trip succeeded. Temporary exports were removed; no private material was logged or committed.
 
 No real user app has been replaced, no live install was forced, and Developer ID/notarization verification for these new framework components must run in release CI. Older app versions require one manual update to acquire the updater.
