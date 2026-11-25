@@ -24,11 +24,19 @@ public struct TransferProgress: Sendable {
     public var stage: String? = nil
 }
 private final class TransferDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    let report: @Sendable (TransferProgress) -> Void
-    init(_ report: @escaping @Sendable (TransferProgress) -> Void) { self.report = report }
+    let report: (@Sendable (TransferProgress) -> Void)?
+    init(_ report: (@Sendable (TransferProgress) -> Void)?) { self.report = report }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let url = request.url, (try? RuntimeInstaller.checkedURL(url)) != nil else { completionHandler(nil); return }
+        var next = request
+        // Redirect destinations never inherit a credential, even among trusted asset hosts.
+        if !GitHubToken.isAPI(url) { next.setValue(nil, forHTTPHeaderField: "Authorization") }
+        completionHandler(next)
+    }
+
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        report(TransferProgress(received: totalBytesWritten, total: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil))
+        report?(TransferProgress(received: totalBytesWritten, total: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil))
     }
 }
 public enum RuntimeInstaller {
@@ -42,9 +50,11 @@ public enum RuntimeInstaller {
     }
     static func download(_ url: URL, progress: (@Sendable (TransferProgress) -> Void)? = nil) async throws -> Data {
         try checkedURL(url)
-        let delegate = progress.map { TransferDelegate($0) }
-        let (file, response) = try await URLSession.shared.download(for: URLRequest(url: url, timeoutInterval: 300), delegate: delegate)
+        let delegate = TransferDelegate(progress)
+        let token = GitHubToken.isAPI(url) ? try GitHubToken.read() : nil
+        let (file, response) = try await URLSession.shared.download(for: GitHubToken.request(url, token: token), delegate: delegate)
         defer { try? FileManager.default.removeItem(at: file) }
+        if GitHubToken.isAPI(url), let http = response as? HTTPURLResponse, let error = GitHubToken.responseError(http) { throw error }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, let final = response.url else { throw ManagerError.invalid("The compatible runtime is not published yet. Try again after the core release finishes.") }
         try checkedURL(final)
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0

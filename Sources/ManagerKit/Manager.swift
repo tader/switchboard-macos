@@ -319,8 +319,10 @@ import LocalAuthentication
         process.terminationHandler = { [weak self] _ in Task { @MainActor [weak self] in
             guard let self else { return }; self.poll?.invalidate(); self.poll = nil; self.input = nil; self.supervisor = nil; self.phase = "Stopped"; self.working = false; self.paired = false; self.administratorReady = false; self.resetAccountSession(); self.onChange?(); self.onStopped?()
         } }
+        var serverEnv = ["SWITCHBOARD_HOST": settings.host, "SWITCHBOARD_PORT": String(settings.port), "SWITCHBOARD_PUBLIC_URL": settings.appURL, "SWITCHBOARD_LOCAL_ACCOUNT_RECOVERY": "1"]
+        if let token = try GitHubToken.read() { serverEnv["SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN"] = token }
         try process.run(); supervisor = process; input = incoming.fileHandleForWriting
-        send(["action": "start", "settings": ["instance": "local-manager", "mode": "runtime", "dataDir": settings.dataPath, "stateDir": settings.statePath, "initialRelease": runtime, "appUrl": settings.appURL, "env": ["SWITCHBOARD_HOST": settings.host, "SWITCHBOARD_PORT": String(settings.port), "SWITCHBOARD_PUBLIC_URL": settings.appURL, "SWITCHBOARD_LOCAL_ACCOUNT_RECOVERY": "1"]]])
+        send(["action": "start", "settings": ["instance": "local-manager", "mode": "runtime", "dataDir": settings.dataPath, "stateDir": settings.statePath, "initialRelease": runtime, "appUrl": settings.appURL, "env": serverEnv]])
         poll = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor [weak self] in self?.send(["action": "status"]) } }
     }
     public func log(_ event: String) {

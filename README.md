@@ -92,3 +92,9 @@ Installation snapshots preserve symbolic links whose targets stay inside the dat
 ## Release automation
 
 Merging a Release Please PR builds, signs and notarizes the app for Apple Silicon and Intel, then attaches the compiled app ZIPs to that GitHub Release. Signed builds must pass notarization, ticket stapling, signature verification and Gatekeeper assessment before upload. See the [release maintainer setup](development/releases/README.md) for certificate export, API key creation, GitHub Secrets and first-release verification.
+
+### Optional GitHub token
+
+In **Settings → Updates**, save a GitHub personal access token to raise API limits for server release downloads. Public repositories require no additional permissions. The token stays in macOS Keychain and can be replaced or removed there in Settings.
+
+The local server receives the token at its next start, exclusively as a rate-limit fallback for plugin catalog browsing and installation, including dependencies. Stop and start the server after changing the token. Server-side plugin updates and server updates do not use this token. This server behavior requires a runtime release containing installation-token support; older runtimes ignore it. The token does not create a GitHub connection.
