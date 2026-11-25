@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.3.1...switchboard-macos-v0.4.0) (2026-11-25)
+
+
+### Features
+
+* add secure GitHub token for release requests ([bfaf016](https://github.com/tader/switchboard-macos/commit/bfaf0160f17381dd1f25c0f70ab43b82740481c4))
+* add secure GitHub token for release requests ([ade0962](https://github.com/tader/switchboard-macos/commit/ade0962a79e7498d5cda8288d1686e6c41b10a55))
+
 ## [0.3.1](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.3.0...switchboard-macos-v0.3.1) (2026-11-24)
 
 
