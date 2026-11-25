@@ -10,6 +10,11 @@ public struct SettingsView: View {
     @State private var copyFolders = false
     @State private var confirmLockRecovery = false
     @State private var dirty = false
+    @State private var tokenDraft = ""
+    @State private var tokenConfigured = false
+    @State private var tokenBusy = false
+    @State private var tokenMessage: String?
+
     public init(model: Manager, appUpdater: AppUpdater? = nil) { self.model = model; self.appUpdater = appUpdater ?? AppUpdater(enabled: false); _draft = State(initialValue: model.settings) }
     init(model: Manager, initiallyAdvanced: Bool, appUpdater: AppUpdater? = nil) {
         self.model = model; self.appUpdater = appUpdater ?? AppUpdater(enabled: false); _draft = State(initialValue: model.settings); _advanced = State(initialValue: initiallyAdvanced)
@@ -34,7 +39,7 @@ public struct SettingsView: View {
                 } else { Text("Closing this window keeps Switchboard running.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true) }
             }.padding(16)
         }.frame(minWidth: 420).background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { model.checkReleases() }
+        .onAppear { model.checkReleases(); refreshTokenStatus() }
         .sheet(isPresented: Binding(get: { model.wantsRecovery && model.phase == "Running" }, set: { if !$0 { model.dismissRecovery() } })) { AccountRecoveryView(model: model) }
 
     }
@@ -111,6 +116,7 @@ public struct SettingsView: View {
     }
     var updatesSection: some View {
         section("Updates") {
+            tokenSettings
             HStack(alignment: .top, spacing: 16) {
                 section("Mac app") {
                     updateHint("The menu bar app on your Mac.")
@@ -145,6 +151,38 @@ public struct SettingsView: View {
                     releaseActions
                 }
             }.fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    private var tokenSettings: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("GitHub token (optional)").font(.headline)
+            Text(tokenConfigured ? "Token saved in Keychain." : "No token configured.")
+            SecureField("GitHub token", text: $tokenDraft).textFieldStyle(.roundedBorder).accessibilityIdentifier("github-token")
+            HStack {
+                Button("Save Token") { changeToken(remove: false) }.disabled(tokenDraft.isEmpty)
+                Button("Remove Token") { changeToken(remove: true) }.disabled(!tokenConfigured)
+                Link("Create a token", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
+            }
+            Text("Raises GitHub API limits for server downloads and plugin installation. Public repositories need no additional token permissions.").font(.callout).fixedSize(horizontal: false, vertical: true)
+            if let tokenMessage { Text(tokenMessage).font(.callout).textSelection(.enabled) }
+        }.disabled(tokenBusy || model.working || model.checkingReleases)
+    }
+    private func refreshTokenStatus() {
+        Task {
+            do { tokenConfigured = try await Task.detached { try GitHubToken.exists() }.value }
+            catch { tokenMessage = error.localizedDescription }
+        }
+    }
+    private func changeToken(remove: Bool) {
+        let value = tokenDraft
+        tokenBusy = true
+        Task {
+            defer { tokenBusy = false }
+            do {
+                try await Task.detached { if remove { try GitHubToken.remove() } else { try GitHubToken.save(value) } }.value
+                tokenConfigured = !remove; tokenDraft = ""
+                tokenMessage = model.isRunning ? "Saved. Stop and start Switchboard to apply the change to plugin installation." : "Saved. Applies to the next release request and server start."
+            } catch { tokenMessage = error.localizedDescription }
         }
     }
     private func updateHint(_ text: String) -> some View {
