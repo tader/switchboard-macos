@@ -182,7 +182,9 @@ public struct SettingsView: View {
                 }.fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 24) { appUpdates; Divider(); serverUpdates }
             }
-            DisclosureGroup(isExpanded: $tokenExpanded) { tokenSettings.padding(.top, 8) } label: {
+            DisclosureGroup(isExpanded: $tokenExpanded) {
+                tokenSettings.padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
                 Text("GitHub token for higher limits and repository access (optional)").font(.headline).fixedSize(horizontal: false, vertical: true)
             }
         }
