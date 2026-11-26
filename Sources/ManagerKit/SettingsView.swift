@@ -11,7 +11,7 @@ public struct SettingsView: View {
     @State private var confirmLockRecovery = false
     @State private var dirty = false
     @State private var tokenDraft = ""
-    @State private var tokenConfigured = false
+    @State private var tokenConfigured: Bool?
     @State private var tokenBusy = false
     @State private var tokenMessage: String?
 
@@ -62,7 +62,13 @@ public struct SettingsView: View {
             }
             VStack(alignment: .leading, spacing: 5) {
                 Text(advanced ? "Advanced Settings" : "Switchboard").font(.title2.bold())
-                Text(statusText).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).accessibilityIdentifier("server-status")
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(model.phase == "Running" ? Color.green : model.working ? Color.orange : Color.secondary)
+                        .frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                    Text(statusText).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).accessibilityIdentifier("server-status")
+                }
             }
             Spacer()
             if !advanced {
@@ -83,26 +89,14 @@ public struct SettingsView: View {
                 Text("Get started").font(.headline)
                 Text("Set up Switchboard to download the server and create your account in your browser. The recommended settings are ready to use.").foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
             }
-            section("Account") {
-                if model.phase == "Running" {
-                    if model.administratorReady { Text("Your account is ready.") }
-                    else {
-                        Text("Finish creating your account in your browser.")
-                        Button("Continue Account Setup") { model.continueSetup() }.disabled(model.accountBusy || !model.canContinueSetup)
-                        if !model.canContinueSetup { Text("Restart Switchboard to get a new setup link.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)) }
-                    }
-                } else { Text("Start Switchboard to access your account.").foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)) }
-                if model.settings.configured {
-                    if model.phase == "Running" {
-                        Button("Recover Password…") { model.beginPasswordRecovery() }.disabled(model.working || model.accountBusy)
-                    } else {
-                        Text("Password recovery needs the local server to be running.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
-                        Button("Start & Continue to Recovery…") { model.beginPasswordRecovery() }.disabled(model.working)
-                    }
+            if model.phase == "Running" && !model.administratorReady {
+                section("Account") {
+                    Text("Finish creating your account in your browser.")
+                    Button("Continue Account Setup") { model.continueSetup() }.disabled(model.accountBusy || !model.canContinueSetup)
+                    if !model.canContinueSetup { updateHint("Restart Switchboard to get a new setup link.") }
                 }
-                if let accountError = model.accountError, !model.wantsRecovery { Text(accountError).foregroundStyle(.red) }
-                if model.attention > 0 { Button("Sign in to connections (\(model.attention))") { model.openConnections() } }
             }
+            if model.attention > 0 { Button("Sign in to connections (\(model.attention))") { model.openConnections() } }
             section("Startup") {
                 Toggle("Start Switchboard when the app opens", isOn: Binding(get: { model.settings.startServer }, set: { model.savePreferences(startServer: $0) })).disabled(model.working)
                 Toggle("Open app when I log in to my Mac", isOn: Binding(get: { model.loginStatus == "On" }, set: { model.setLogin($0) }))
@@ -112,29 +106,33 @@ public struct SettingsView: View {
                 }
             }
             updatesSection
+            if model.settings.configured && (model.phase != "Running" || model.administratorReady) {
+                Button(model.phase == "Running" ? "Recover Password…" : "Start & Continue to Recovery…") {
+                    model.beginPasswordRecovery()
+                }.disabled(model.working || model.accountBusy)
+            }
+            if let accountError = model.accountError, !model.wantsRecovery { Text(accountError).foregroundStyle(.red) }
         }
     }
     var updatesSection: some View {
         section("Updates") {
-            tokenSettings
-            HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
                 section("Mac app") {
                     updateHint("The menu bar app on your Mac.")
-                    Text("Version: \(appUpdater.version)").textSelection(.enabled)
+                    versionRow(installed: appUpdater.version, available: appUpdater.availableVersion, current: appUpdater.isUpToDate)
                     if let message = appUpdater.availabilityMessage { updateHint(message) }
                     else {
                         Toggle("Check automatically", isOn: Binding(get: { appUpdater.automaticallyChecksForUpdates }, set: { appUpdater.setAutomaticallyChecksForUpdates($0) }))
                             .accessibilityLabel("Check for Mac app updates automatically")
                         Button("Check for updates…") { appUpdater.checkForUpdates() }.disabled(!appUpdater.canCheckForUpdates)
                             .accessibilityLabel("Check for Mac app updates")
-                        updateHint("Asks before installing. Stops server and reopens app.")
                     }
                 }
                 Divider()
                 section("Server") {
                     updateHint("Runs Switchboard in your browser.")
-                    if let installed = model.installedTag { Text("Version: \(installed)") }
-                    else { Text(model.settings.runtimePath == nil ? "Not installed yet." : "The installation needs repair. Open Advanced to reinstall.") }
+                    versionRow(installed: model.installedTag, available: model.preferredRelease?.tag, current: model.installedTag != nil && model.installedTag == model.preferredRelease?.tag)
+                    if model.installedTag == nil { Text(model.settings.runtimePath == nil ? "Not installed yet." : "The installation needs repair. Open Advanced to reinstall.") }
                     if let pin = model.settings.pinnedRelease {
                         Label("Pinned to \(pin)", systemImage: "pin").font(.callout)
                         Text("Change the pinned version in Advanced.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))
@@ -150,20 +148,29 @@ public struct SettingsView: View {
                     }
                     releaseActions
                 }
-            }.fixedSize(horizontal: false, vertical: true)
+            }
+            tokenSettings
+        }
+    }
+    private func versionRow(installed: String?, available: String?, current: Bool) -> some View {
+        HStack {
+            if let installed { Text("Installed: \(installed)").textSelection(.enabled) }
+            if current { Label("Up to date", systemImage: "checkmark.circle") }
+            else if let available { Text("Available: \(available)").textSelection(.enabled) }
         }
     }
     private var tokenSettings: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("GitHub token (optional)").font(.headline)
-            Text(tokenConfigured ? "Token saved in Keychain." : "No token configured.")
-            SecureField("GitHub token", text: $tokenDraft).textFieldStyle(.roundedBorder).accessibilityIdentifier("github-token")
-            HStack {
-                Button("Save Token") { changeToken(remove: false) }.disabled(tokenDraft.isEmpty)
-                Button("Remove Token") { changeToken(remove: true) }.disabled(!tokenConfigured)
-                Link("Create a token", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
+            Text("GitHub token for higher limits and repository access (optional)").font(.headline)
+            if tokenConfigured == true {
+                Button("Remove Token") { changeToken(remove: true) }
+            } else if tokenConfigured == false {
+                SecureField("GitHub token", text: $tokenDraft).textFieldStyle(.roundedBorder).accessibilityIdentifier("github-token")
+                HStack {
+                    Button("Save Token") { changeToken(remove: false) }.disabled(tokenDraft.isEmpty)
+                    Link("Create a token", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
+                }
             }
-            Text("Raises GitHub API limits for server downloads and plugin installation. Public repositories need no additional token permissions.").font(.callout).fixedSize(horizontal: false, vertical: true)
             if let tokenMessage { Text(tokenMessage).font(.callout).textSelection(.enabled) }
         }.disabled(tokenBusy || model.working || model.checkingReleases)
     }
@@ -192,13 +199,9 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let error = model.releaseError { Text(error).foregroundStyle(.red).textSelection(.enabled).accessibilityIdentifier("release-error-message") }
             if let target = model.preferredRelease {
-                Text("Selected release: \(target.tag)").font(.callout)
-                if model.settings.configured {
-                    if model.installedTag == target.tag { Label("Up to date", systemImage: "checkmark.circle") }
-                    else {
-                        Button(model.isRunning ? "Stop & Update" : "Install update") { model.installRuntime(target) }.disabled(model.working)
-                        Text("Keeps your data. Leaves server stopped.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
-                    }
+                if model.settings.configured && model.installedTag != target.tag {
+                    Button(model.isRunning ? "Stop & Update" : "Install update") { model.installRuntime(target) }.disabled(model.working)
+                    Text("Keeps your data. Leaves server stopped.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
                 }
             } else if !model.checkingReleases && model.releaseError == nil {
                 Text("No compatible release is available for this selection.").foregroundStyle(Color(nsColor: .labelColor).opacity(0.78))

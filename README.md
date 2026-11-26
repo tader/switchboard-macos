@@ -29,7 +29,7 @@ Existing compatible data is adopted without replacing its database or resetting 
 
 While initial setup is incomplete, **Continue Account Setup** opens the browser setup form again. New installations can choose a username; existing accounts keep theirs. If your server is too old to refresh the link, restart Switchboard to get a fresh setup link.
 
-In Settings → Account, choose **Recover Password…**, select an enabled local account, then **Authenticate & Recover**. If stopped, use **Start & Continue to Recovery…**. Your Mac requires fresh device-owner authentication, such as Touch ID or your Mac login password, before the app requests a recovery link. You enter the new Switchboard password only in your browser.
+Near the bottom of Settings, choose **Recover Password…**, select an enabled local account, then **Authenticate & Recover**. If stopped, use **Start & Continue to Recovery…**. Your Mac requires fresh device-owner authentication, such as Touch ID or your Mac login password, before the app requests a recovery link. You enter the new Switchboard password only in your browser.
 
 The link expires after 10 minutes and works once. Completing recovery signs the selected user out of existing browser sessions while preserving their username, role, connections and data. Disabled users and peer-shadow accounts are excluded. A server version without this capability shows an update explanation.
 
