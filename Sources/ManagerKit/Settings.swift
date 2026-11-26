@@ -22,13 +22,35 @@ public struct Settings: Codable, Equatable, Sendable {
         guard path.hasPrefix("/"), !path.contains("\0") else { throw ManagerError.invalid("Choose an absolute folder path.") }
         return URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
     }
-    public func validate() throws {
-        let data = try Self.canonical(dataPath), state = try Self.canonical(statePath)
-        guard data != "/", state != "/", data != state, !data.hasPrefix(state + "/"), !state.hasPrefix(data + "/") else { throw ManagerError.invalid("Data and updater folders must be separate and must not contain one another.") }
+    public enum Field: String, CaseIterable, Hashable, Sendable { case dataPath, statePath, host, port, browserURL }
+    public func validationErrors() -> [Field: String] {
+        var errors: [Field: String] = [:]
+        let data = try? Self.canonical(dataPath), state = try? Self.canonical(statePath)
+        if data == nil || data == "/" { errors[.dataPath] = "Choose an absolute data folder other than the disk root." }
+        if state == nil || state == "/" { errors[.statePath] = "Choose an absolute updater folder other than the disk root." }
+        if let data, let state, data == state || data.hasPrefix(state + "/") || state.hasPrefix(data + "/") {
+            let message = "Data and updater folders must be separate and must not contain one another."
+            errors[.dataPath] = message; errors[.statePath] = message
+        }
         var v4 = in_addr(), v6 = in6_addr()
-        guard (1024...65535).contains(port), host == "localhost" || inet_pton(AF_INET, host, &v4) == 1 || inet_pton(AF_INET6, host, &v6) == 1 else { throw ManagerError.invalid("Choose a local IP listen address and a port from 1024 to 65535.") }
-        guard let url = URL(string: browserURL), ["http", "https"].contains(url.scheme), url.user == nil, url.password == nil, url.host != nil else { throw ManagerError.invalid("Enter an HTTP or HTTPS browser URL without credentials.") }
-        if let runtimePath { let runtime = try Self.canonical(runtimePath); guard runtime != data, !runtime.hasPrefix(data + "/"), !data.hasPrefix(runtime + "/") else { throw ManagerError.invalid("Runtime and data folders must be separate.") } }
+        if !(host == "localhost" || inet_pton(AF_INET, host, &v4) == 1 || inet_pton(AF_INET6, host, &v6) == 1) {
+            errors[.host] = "Choose a local IP listen address or localhost."
+        }
+        if !(1024...65535).contains(port) { errors[.port] = "Enter a port from 1024 to 65535." }
+        if let url = URL(string: browserURL), ["http", "https"].contains(url.scheme), url.user == nil, url.password == nil, url.host != nil {} else {
+            errors[.browserURL] = "Enter an HTTP or HTTPS browser URL without credentials."
+        }
+        if let runtimePath {
+            if let runtime = try? Self.canonical(runtimePath), let data,
+                runtime != data, !runtime.hasPrefix(data + "/"), !data.hasPrefix(runtime + "/") {} else {
+                errors[.dataPath] = "Runtime and data folders must be separate and use absolute paths."
+            }
+        }
+        return errors
+    }
+    public func validate() throws {
+        let errors = validationErrors()
+        if let first = Field.allCases.compactMap({ errors[$0] }).first { throw ManagerError.invalid(first) }
     }
     public var appURL: String {
         let control = host == "0.0.0.0" ? "127.0.0.1" : host == "::" ? "::1" : host
@@ -40,7 +62,9 @@ public struct Settings: Codable, Equatable, Sendable {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let bytes = try JSONEncoder().encode(self)
         let temporary = url.appendingPathExtension("tmp")
-        FileManager.default.createFile(atPath: temporary.path, contents: bytes, attributes: [.posixPermissions: 0o600])
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try bytes.write(to: temporary, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
         if rename(temporary.path, url.path) != 0 { throw ManagerError.invalid("Could not save settings.") }
     }
 }
@@ -53,8 +77,12 @@ public enum Relocation {
         do { try FileManager.default.copyItem(at: from, to: to); guard try inventory(to) == manifest else { throw ManagerError.invalid("Folder verification failed. The original remains available.") } }
         catch { try? FileManager.default.removeItem(at: to); throw error }
     }
+    static func stateMetadataFiles(at root: URL) -> [URL] {
+        [root.appendingPathComponent("current.json"), root.appendingPathComponent("journal.json"), root.appendingPathComponent("last-success.json")] +
+        ((try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("history"), includingPropertiesForKeys: nil)) ?? [])
+    }
     public static func rebaseState(at root: URL, oldState: String, newState: String, oldData: String, newData: String) throws {
-        let files = [root.appendingPathComponent("current.json"), root.appendingPathComponent("journal.json"), root.appendingPathComponent("last-success.json")] + ((try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("history"), includingPropertiesForKeys: nil)) ?? [])
+        let files = stateMetadataFiles(at: root)
         let keys: Set<String> = ["release", "previous", "target", "backup", "initialRelease", "stateDir", "dataDir"]
         func rebase(_ value: Any, key: String = "") -> Any {
             if let text = value as? String, keys.contains(key) {

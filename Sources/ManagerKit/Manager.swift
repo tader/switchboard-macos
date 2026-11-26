@@ -23,6 +23,41 @@ import LocalAuthentication
     @Published public var paired = false
     @Published public var eligible = false
     @Published public var updateState = ""
+    @Published public private(set) var hasCurrentStatus = false
+    @Published public var startConfirmationRequested = false
+    @Published public var preferenceScope = "startup"
+    @Published public var preferenceMessage: String?
+    @Published public var preferenceError: String?
+    @Published public var loginError: String?
+    public private(set) lazy var settingsEditor = SettingsEditor(settings: settings)
+    private var lastStatusAt: Date?
+    public var statusDescription: String {
+        switch phase {
+        case "Stopped": settings.configured ? "Not running" : "Setup required"
+        case "Running": hasCurrentStatus ? "Running on this Mac" : "Waiting for server status…"
+        case "Downloading runtime…": "Downloading Switchboard…"
+        case "Verifying and unpacking…": "Preparing Switchboard…"
+        case "Verifying data and selecting runtime…": "Finishing installation…"
+        default: phase
+        }
+    }
+    public var canOpenBrowser: Bool { phase == "Running" && hasCurrentStatus && administratorReady }
+    public var connectionSignInCount: Int { canOpenBrowser ? max(0, attention) : 0 }
+    public var connectionSignInDescription: String {
+        let count = connectionSignInCount
+        return count == 1 ? "1 connection needs sign-in" : "\(count) connections need sign-in"
+    }
+    public func requestStart() {
+        guard !isRunning && !working else { return }
+        if settingsEditor.isDirty { startConfirmationRequested = true; onChange?() }
+        else { start() }
+    }
+    func invalidateStatus() {
+        hasCurrentStatus = false; attention = 0; administratorReady = false; lastStatusAt = nil
+    }
+    func expireStatus(now: Date = Date()) {
+        if let lastStatusAt, now.timeIntervalSince(lastStatusAt) > 8 { invalidateStatus(); onChange?() }
+    }
     @Published public var loginStatus = "Off"
     @Published public var working = false
     @Published public var downloadProgress: TransferProgress?
@@ -37,7 +72,10 @@ import LocalAuthentication
         if let pin { next.pinnedRelease = pin }
         if clearPin { next.pinnedRelease = nil }
         if let startServer { next.startServer = startServer }
-        do { try next.save(settingsURL); settings = next } catch { self.error = error.localizedDescription }
+        preferenceScope = startServer != nil ? "startup" : "release"
+        preferenceMessage = nil; preferenceError = nil
+        do { try next.save(settingsURL); settings = next; preferenceMessage = "Preference saved." }
+        catch { preferenceError = "Preference could not be saved. The previous value is still in use. " + error.localizedDescription }
     }
     private func reportProgress(_ progress: TransferProgress) {
         guard working, ["Downloading runtime…", "Verifying and unpacking…"].contains(phase) else { return }
@@ -81,7 +119,7 @@ import LocalAuthentication
         guard !working && !accountBusy else { return }
         accountError = nil; accountNotice = nil; wantsRecovery = true
         if phase == "Running" { loadRecoveryAccounts() }
-        else { start() }
+        else { requestStart() }
     }
     public func loadRecoveryAccounts() {
         guard phase == "Running", accountCapabilities.contains("account-users"), !accountBusy else { return }
@@ -137,6 +175,7 @@ import LocalAuthentication
         accountTimeout?.cancel(); accountTimeout = nil; accountRequest = nil; accountBusy = false; accountError = error
     }
     private func resetAccountSession() {
+        invalidateStatus()
         accountSession = UUID(); finishAccountRequest(); accountCapabilities = []; accountUsers = []; setupURL = nil
     }
     // Correlation prevents late responses from opening links after stop/restart or a different request.
@@ -160,7 +199,7 @@ import LocalAuthentication
         let recovery = pending.action == "account-recovery"
         finishAccountRequest()
         accountBrowserOpener(target)
-        if recovery { accountNotice = "Choose a new password in your browser. The link expires in 10 minutes." }
+        if recovery { accountNotice = "Recovery opened in your browser. Choose a new password within 10 minutes." }
     }
     private func validatedAccountURL(_ value: String) -> URL? {
         guard let url = URL(string: value), let expected = URL(string: settings.appURL),
@@ -168,14 +207,17 @@ import LocalAuthentication
             url.user == nil, url.password == nil, url.path == "/invite", url.query == nil, url.fragment?.isEmpty == false else { return nil }
         return url
     }
+    var browserOpener: (URL) -> Void = { NSWorkspace.shared.open($0) }
     public var onChange: (() -> Void)?
     public var onStopped: (() -> Void)?
     public let settingsURL: URL
+    private var serverSession = UUID()
     private var supervisor: Process?
     private var input: FileHandle?
     private var poll: Timer?
     private var outputBuffer = Data()
     private var installTask: Task<Void, Never>?
+    var runtimeTokenReader: () throws -> String? = { try GitHubToken.read() }
     var runtimeInstaller: (@Sendable (String) async throws -> String)?
     private var setupOpened = false
     public var isInstalling: Bool { installTask != nil }
@@ -242,8 +284,28 @@ import LocalAuthentication
         }
     }
     public func setLogin(_ enabled: Bool) {
+        loginError = nil
         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; refreshLoginStatus() }
-        catch { self.error = "Could not change the login item. Check Login Items in System Settings."; refreshLoginStatus() }
+        catch { loginError = "Could not change the login item. Try again, or check Login Items in System Settings."; refreshLoginStatus() }
+    }
+    private struct RelocationReceipt {
+        let source: String
+        let originalInventory: [String: String]
+        var copiedInventory: [String: String]
+    }
+    private var relocationReceipts: [String: RelocationReceipt] = [:]
+    private func copyOrReconcile(from source: String, to target: String) throws {
+        if let receipt = relocationReceipts[target], receipt.source == source {
+            guard try Relocation.inventory(URL(fileURLWithPath: source)) == receipt.originalInventory,
+                  try Relocation.inventory(URL(fileURLWithPath: target)) == receipt.copiedInventory else {
+                throw ManagerError.invalid("A retained relocation copy has changed. Your original folders remain available. Choose a new, separate destination before retrying.")
+            }
+        } else {
+            try Relocation.copyVerified(from: URL(fileURLWithPath: source), to: URL(fileURLWithPath: target))
+            relocationReceipts[target] = RelocationReceipt(source: source,
+                originalInventory: try Relocation.inventory(URL(fileURLWithPath: source)),
+                copiedInventory: try Relocation.inventory(URL(fileURLWithPath: target)))
+        }
     }
     public func save(_ proposed: Settings, copyData: Bool = false, copyState: Bool = false) throws {
         guard canEditPaths else { throw ManagerError.invalid("Stop Switchboard before changing settings.") }
@@ -251,17 +313,40 @@ import LocalAuthentication
         var next = proposed
         if proposed.dataPath != settings.dataPath && FileManager.default.fileExists(atPath: settings.dataPath) {
             guard copyData else { throw ManagerError.invalid("Choose Copy and verify to relocate existing data.") }
-            try Relocation.copyVerified(from: URL(fileURLWithPath: settings.dataPath), to: URL(fileURLWithPath: proposed.dataPath))
+            try copyOrReconcile(from: settings.dataPath, to: proposed.dataPath)
         }
         if proposed.statePath != settings.statePath && FileManager.default.fileExists(atPath: settings.statePath) {
             guard copyState else { throw ManagerError.invalid("Choose Copy and verify to relocate updater state.") }
-            try Relocation.copyVerified(from: URL(fileURLWithPath: settings.statePath), to: URL(fileURLWithPath: proposed.statePath))
+            try copyOrReconcile(from: settings.statePath, to: proposed.statePath)
             if let runtime = settings.runtimePath, runtime.hasPrefix(settings.statePath + "/") { next.runtimePath = proposed.statePath + runtime.dropFirst(settings.statePath.count) }
         }
-        if proposed.dataPath != settings.dataPath || proposed.statePath != settings.statePath {
-            try Relocation.rebaseState(at: URL(fileURLWithPath: proposed.statePath), oldState: settings.statePath, newState: proposed.statePath, oldData: settings.dataPath, newData: proposed.dataPath)
+        let metadataBackup: [(URL, Data)] = proposed.statePath == settings.statePath && proposed.dataPath != settings.dataPath ?
+            try Relocation.stateMetadataFiles(at: URL(fileURLWithPath: settings.statePath))
+                .filter { FileManager.default.fileExists(atPath: $0.path) }.map { ($0, try Data(contentsOf: $0)) } : []
+        do {
+            if proposed.dataPath != settings.dataPath || proposed.statePath != settings.statePath {
+                try Relocation.rebaseState(at: URL(fileURLWithPath: proposed.statePath), oldState: settings.statePath, newState: proposed.statePath, oldData: settings.dataPath, newData: proposed.dataPath)
+            }
+            if var receipt = relocationReceipts[proposed.statePath] {
+                receipt.copiedInventory = try Relocation.inventory(URL(fileURLWithPath: proposed.statePath))
+                relocationReceipts[proposed.statePath] = receipt
+            }
+            try next.save(settingsURL)
+        } catch {
+            do {
+                for (file, bytes) in metadataBackup {
+                    try bytes.write(to: file, options: .atomic)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+                }
+            } catch {
+                throw ManagerError.invalid("Settings were not saved and updater metadata could not be restored. Keep the original and copied folders and inspect Show Logs and Backups before retrying.")
+            }
+            if !relocationReceipts.isEmpty {
+                throw ManagerError.invalid("Could not save settings. Verified copies remain at the chosen destinations; the originals are retained. Retry with the same folders, or choose new, separate destinations.")
+            }
+            throw error
         }
-        try next.save(settingsURL); settings = next; error = nil
+        settings = next; self.error = nil; relocationReceipts = [:]
     }
     public func cancelInstall() {
         guard let installTask else { return }
@@ -310,20 +395,23 @@ import LocalAuthentication
         process.currentDirectoryURL = URL(fileURLWithPath: runtime)
         process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "NODE_ENV": "production"]
         process.standardInput = incoming; process.standardOutput = outgoing; process.standardError = FileHandle.nullDevice
+        let session = UUID(); serverSession = session
         outputBuffer = Data(); setupOpened = false; resetAccountSession()
         outgoing.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil; return }
-            Task { @MainActor [weak self] in self?.receive(data) }
+            Task { @MainActor [weak self] in
+                guard let self, self.serverSession == session else { return }; self.receive(data)
+            }
         }
         process.terminationHandler = { [weak self] _ in Task { @MainActor [weak self] in
-            guard let self else { return }; self.poll?.invalidate(); self.poll = nil; self.input = nil; self.supervisor = nil; self.phase = "Stopped"; self.working = false; self.paired = false; self.administratorReady = false; self.resetAccountSession(); self.onChange?(); self.onStopped?()
+            guard let self, self.serverSession == session else { return }; self.poll?.invalidate(); self.poll = nil; self.input = nil; self.supervisor = nil; self.phase = "Stopped"; self.working = false; self.paired = false; self.administratorReady = false; self.resetAccountSession(); self.onChange?(); self.onStopped?()
         } }
         var serverEnv = ["SWITCHBOARD_HOST": settings.host, "SWITCHBOARD_PORT": String(settings.port), "SWITCHBOARD_PUBLIC_URL": settings.appURL, "SWITCHBOARD_LOCAL_ACCOUNT_RECOVERY": "1"]
-        if let token = try GitHubToken.read() { serverEnv["SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN"] = token }
+        if let token = try runtimeTokenReader() { serverEnv["SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN"] = token }
         try process.run(); supervisor = process; input = incoming.fileHandleForWriting
         send(["action": "start", "settings": ["instance": "local-manager", "mode": "runtime", "dataDir": settings.dataPath, "stateDir": settings.statePath, "initialRelease": runtime, "appUrl": settings.appURL, "env": serverEnv]])
-        poll = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor [weak self] in self?.send(["action": "status"]) } }
+        poll = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor [weak self] in self?.expireStatus(); self?.send(["action": "status"]) } }
     }
     public func log(_ event: String) {
         // Fixed operational labels only; never log pipe payloads or bootstrap links.
@@ -334,7 +422,7 @@ import LocalAuthentication
         if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
         if let handle = try? FileHandle(forWritingTo: file) { defer { try? handle.close() }; try? handle.seekToEnd(); try? handle.write(contentsOf: Data("\(ISO8601DateFormatter().string(from: Date())) \(event)\n".utf8)) }
     }
-    private func receive(_ bytes: Data) {
+    func receive(_ bytes: Data) {
         outputBuffer.append(bytes)
         guard outputBuffer.count < 1024*1024 else { error = "Invalid manager response."; stop(); return }
         while let end = outputBuffer.firstIndex(of: 10) {
@@ -342,19 +430,24 @@ import LocalAuthentication
             guard let m = try? JSONSerialization.jsonObject(with: line) as? [String: Any], let event = m["event"] as? String else { continue }
             if event != "status" && event != "accepted" { log(event) }
             switch event {
-            case "started": phase = "Running"; working = false
+            case "started": invalidateStatus(); phase = "Running"; working = false
                 accountCapabilities = m["accountCapabilities"] as? [String] ?? []
                 if wantsRecovery { loadRecoveryAccounts() }
                 if let url = m["setupUrl"] as? String, !setupOpened, let target = URL(string: url), target.scheme == "http", target.host == URL(string: settings.appURL)?.host, target.port == settings.port, target.path == "/invite", target.user == nil, target.password == nil, target.fragment?.isEmpty == false { setupOpened = true; setupURL = target; NSWorkspace.shared.open(target) }
             case "account-result": receiveAccountResult(m)
             case "status":
-                administratorReady = m["ready"] as? Bool == true; if administratorReady { setupURL = nil }; paired = m["paired"] as? Bool == true; attention = m["attention"] as? Int ?? 0; eligible = m["eligible"] as? Bool == true
+                guard phase == "Running", let ready = m["ready"] as? Bool, let count = m["attention"] as? Int, count >= 0 else {
+                    invalidateStatus(); onChange?(); continue
+                }
+                hasCurrentStatus = true; lastStatusAt = Date()
+                administratorReady = ready; if administratorReady { setupURL = nil }
+                paired = m["paired"] as? Bool == true; attention = count; eligible = m["eligible"] as? Bool == true
                 updateState = (m["job"] as? [String: Any])?["state"] as? String ?? ""
             case "paired": paired = true
-            case "finishing": phase = "Finishing update before quitting…"
-            case "stopped": phase = "Stopped"; working = false
-            case "server-failed": error = m["message"] as? String; phase = "Stopping…"
-            case "error": error = m["message"] as? String ?? "The action could not complete."; if phase != "Running" { stop() }
+            case "finishing": invalidateStatus(); phase = "Finishing update before quitting…"
+            case "stopped": invalidateStatus(); phase = "Stopped"; working = false
+            case "server-failed": invalidateStatus(); error = m["message"] as? String; phase = "Stopping…"
+            case "error": invalidateStatus(); error = m["message"] as? String ?? "The action could not complete."; if phase != "Running" { stop() }
             default: break
             }
             onChange?()
@@ -368,7 +461,7 @@ import LocalAuthentication
     @discardableResult private func writeCommand(_ value: [String: Any]) -> Bool {
         if let accountCommandWriter { return accountCommandWriter(value) }
         guard let input, let bytes = try? JSONSerialization.data(withJSONObject: value) else { return false }
-        do { try input.write(contentsOf: bytes + Data([10])); return true } catch { self.error = "The local manager disconnected."; return false }
+        do { try input.write(contentsOf: bytes + Data([10])); return true } catch { invalidateStatus(); self.error = "The local manager disconnected."; onChange?(); return false }
     }
     public func stop() { resetAccountSession(); if isRunning { working = true; phase = "Stopping…"; send(["action": "quit"]); onChange?() } else if isInstalling { cancelInstall() } else { onStopped?() } }
     /// Defer Sparkle's relaunch until owned processes and any install cleanup have finished.
@@ -378,9 +471,9 @@ import LocalAuthentication
         stop()
         return true
     }
-    public func restart() { onStopped = { [weak self] in self?.onStopped = nil; self?.start() }; stop() }
+    public func restart() { onStopped = { [weak self] in self?.onStopped = nil; self?.requestStart() }; stop() }
     public func update(_ action: String) { if action == "check" { checkReleases(); return }; guard ["check", "update", "cancel"].contains(action) else { return }; send(["action": action]) }
-    public func open() { if phase == "Running", let url = URL(string: settings.browserURL) { NSWorkspace.shared.open(url) } else { start() } }
-    public func openConnections() { guard phase == "Running", let url = URL(string: settings.appURL + "/connections") else { return }; NSWorkspace.shared.open(url) }
+    public func open() { if canOpenBrowser, let url = URL(string: settings.browserURL) { browserOpener(url) } else { requestStart() } }
+    public func openConnections() { guard canOpenBrowser, let url = URL(string: settings.appURL + "/connections") else { return }; browserOpener(url) }
     public func showLogs() { NSWorkspace.shared.open(URL(fileURLWithPath: settings.statePath)) }
 }

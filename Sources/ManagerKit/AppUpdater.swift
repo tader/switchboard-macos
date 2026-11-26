@@ -7,6 +7,8 @@ import Sparkle
     @Published public private(set) var canCheckForUpdates = false
     @Published public private(set) var automaticallyChecksForUpdates = true
     @Published public private(set) var availabilityMessage: String?
+    @Published private(set) var availableVersion: String?
+    @Published private(set) var isUpToDate = false
     public let version: String
     public var prepareForInstallation: ((@escaping () -> Void) -> Bool)?
     private var controller: SPUStandardUpdaterController?
@@ -34,10 +36,20 @@ import Sparkle
         ]
         controller.startUpdater()
     }
-    init(previewVersion: String) {
+    init(previewVersion: String, available: String? = nil, current: Bool = false) {
+        availableVersion = available; isUpToDate = current
         version = previewVersion
         super.init()
         canCheckForUpdates = true
+    }
+    public func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        availableVersion = item.displayVersionString
+        isUpToDate = false
+    }
+    public func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
+        availableVersion = nil
+        let reason = ((error as NSError).userInfo[SPUNoUpdateFoundReasonKey] as? NSNumber)?.int32Value
+        isUpToDate = reason == SPUNoUpdateFoundReason.onLatestVersion.rawValue || reason == SPUNoUpdateFoundReason.onNewerThanLatestVersion.rawValue
     }
     public func checkForUpdates() { guard canCheckForUpdates else { return }; controller?.checkForUpdates(nil) }
     public func setAutomaticallyChecksForUpdates(_ enabled: Bool) { controller?.updater.automaticallyChecksForUpdates = enabled }

@@ -29,7 +29,7 @@ Existing compatible data is adopted without replacing its database or resetting 
 
 While initial setup is incomplete, **Continue Account Setup** opens the browser setup form again. New installations can choose a username; existing accounts keep theirs. If your server is too old to refresh the link, restart Switchboard to get a fresh setup link.
 
-In Settings → Account, choose **Recover Password…**, select an enabled local account, then **Authenticate & Recover**. If stopped, use **Start & Continue to Recovery…**. Your Mac requires fresh device-owner authentication, such as Touch ID or your Mac login password, before the app requests a recovery link. You enter the new Switchboard password only in your browser.
+Near the bottom of Settings, choose **Recover Password…**, select an enabled local account, then **Authenticate & Recover**. If stopped, use **Start & Continue to Recovery…**. Your Mac requires fresh device-owner authentication, such as Touch ID or your Mac login password, before the app requests a recovery link. You enter the new Switchboard password only in your browser.
 
 The link expires after 10 minutes and works once. Completing recovery signs the selected user out of existing browser sessions while preserving their username, role, connections and data. Disabled users and peer-shadow accounts are excluded. A server version without this capability shows an update explanation.
 
@@ -37,15 +37,17 @@ This feature trusts the macOS account owning the local installation to recover i
 
 ## Menu bar
 
-Left-click the icon to open a running server in your default browser. If stopped or installing, left-click opens setup/settings. Right-click for **Open**, **Start/Stop**, **Restart**, **Settings**, **Show Logs** and **Quit**.
+Left-click the icon to open a ready server in your default browser. Until it is ready, left-click opens Settings. Right-click or Control-click for **Open Switchboard**, **Settings…**, **Start/Stop**, **Restart**, **Show Logs** and **Quit**. **⌘,** opens Settings while the app is active.
 
 Closing Settings leaves the app and server running. **Quit** gracefully stops the app's own server and updater. During a server update it waits for cutover/recovery to finish before quitting. If the app crashes, pipe closure stops the supervisor and its server; if the supervisor crashes, IPC disconnection stops its server. A subsequent launch uses the recovery journal rather than replaying an interrupted deployment.
 
-When a connection reports an explicit terminal sign-in failure, the menu bar shows an accessible count. **Sign in to connections** opens the local connections page. Offline services and timeouts do not create sign-in alerts. The app receives only aggregate counts and never polls providers for health.
+When the current ready server reports an explicit terminal sign-in failure, the monochrome menu-bar icon shows a count. The tooltip and accessible name spell out the exact count. **Sign in to connections (N)** appears first in the menu and opens the local connections page. The indicator and action clear at zero, on stop, or when current status is unavailable. Offline services and timeouts do not create sign-in alerts. The app receives only aggregate counts and never polls providers for health.
 
 ## Settings and startup
 
-Choose **Advanced…** for folders, network settings, version pinning and maintenance. Stop the server before changing paths, listen address, port or browser URL. Paths are resolved through symbolic links; the data and updater folders cannot overlap. If relocating existing data or updater state, choose **Copy and verify folders when moving data**. The original folders are retained. The app verifies file contents, rebases known release/journal paths in the copied state and discards stale process metadata before selecting the copy. External symbolic links are refused for relocation.
+Use the always-visible **General** and **Advanced** selector. General separates the server state from account setup/readiness and connection sign-in. Advanced keeps a draft across pane changes, background refreshes and hiding the window. **Save Changes** (⌘S) validates each field and keeps the draft on failure. Starting or restarting with unsaved edits asks whether to save, use saved settings, or cancel.
+
+Choose **Advanced** for folders, network settings, version pinning and maintenance. Stop the server before changing paths, listen address, port or browser URL. Paths are resolved through symbolic links; the data and updater folders cannot overlap. If relocating existing data or updater state, choose **Copy and verify folders when moving data**. The original folders are retained. The app verifies file contents, rebases known release/journal paths in the copied state and discards stale process metadata before selecting the copy. External symbolic links are refused for relocation.
 
 The listen address can be a local IP address or `localhost`. Wildcard `0.0.0.0` and `::` expose the server to other interfaces while the manager uses loopback control. Use an appropriate firewall when choosing a network-facing address. The browser URL is configurable independently.
 
@@ -55,7 +57,7 @@ Settings are owner-readable only. The manager keeps its narrow updater credentia
 
 ## Updates, backups and recovery
 
-Settings → Updates → Server follows **Stable (recommended)** by default. Choose **Development** to follow published prereleases with compatible macOS runtime assets. **Check for updates…** resolves the latest compatible release; installation starts only when you choose it. To select a particular version, open **Advanced…**, enable **Pin a specific version**, and choose a release. Disable pinning to return to your channel. Download progress shows actual bytes and a percentage when the total size is available, followed by verification and installation stages. Installation preserves your data and leaves Switchboard stopped. Cancellation is available before the final selection commit.
+Settings → Updates → Server follows **Stable (recommended)** by default. Choose **Development** to follow published prereleases with compatible macOS runtime assets. **Check for updates…** resolves the latest compatible release; installation starts only when you choose it. To select a particular version, open **Advanced**, enable **Pin a specific version**, and choose a release. Disable pinning to return to your channel. Download progress shows actual bytes and a percentage when the total size is available, followed by verification and installation stages. Installation preserves your data and leaves Switchboard stopped. Cancellation is available before the final selection commit.
 
 Backups and the owner-only `journal.json`, `history/` and `last-success.json` are in your updater folder; **Show Logs** opens that folder. Keep independent off-device backups of the entire data folder and updater folder while stopped. Include `secret.key`, the database, installed extensions, extension state and browser profiles together. Snapshots contain credentials; keep them private and leave room for full copies.
 
@@ -63,7 +65,7 @@ Before normal operation opens, startup failure automatically restores the comple
 
 ## App updates
 
-In Settings → Updates, **Mac app** is the menu bar app on your Mac; **Server** runs Switchboard in your browser. Both update controls live here, side by side.
+In Settings → Updates, **Mac app** is the menu bar app on your Mac; **Server** runs Switchboard in your browser. Both update controls live here, side by side when space permits and stacked in a narrow window.
 
 Signed releases check GitHub for new stable macOS app releases automatically, normally once a day. You are asked before downloading and installing an update; app updates are never installed silently. Use **Check for updates…** from Settings → Updates → Mac app to check immediately. Turn off **Check automatically** if you prefer manual checks.
 
@@ -77,9 +79,15 @@ Install the first signed app release containing this updater manually; older app
 
 Run `just release` to build for this Mac, or `just release arm64` / `just release x86_64`. Swift and just are required. The optimized unsigned app is `.dist/<arch>/Switchboard.app`; the versioned unsigned ZIP is in `.dist/`.
 
+### Native checks
+
+Run `swift test` on macOS. To export synthetic native Settings and status-button renders, run `SWITCHBOARD_UI_SNAPSHOT_DIR="$PWD/.dist/ui-review" swift test --filter SettingsDesignTests`. Fixtures isolate accounts, Keychain reads, release requests and server processes from personal data. The status-button PNGs render the actual AppKit cell in a test window; they do not verify its placement in the system menu bar.
+
+For interactive verification, check General/Advanced navigation, retained drafts and failed saves, validation focus, ⌘S/⌘,, Login Items approval/return, recovery selection and cancellation, native menu keyboard access, and VoiceOver. Check the menu-bar count and first menu action at 0, 1 and multiple sign-ins, after stopping, and after loss of current status. Inspect 460/560-point widths in light/dark and enlarged text.
+
 ## Install or repair without a running server
 
-Open Settings → Updates → Server and choose **Check for updates…**, then install the selected release. For older versions, open **Advanced…** and enable **Pin a specific version**. Use **Load Older Versions** to browse earlier releases. **Reinstall Selected Release** is under Advanced → Maintenance.
+Open Settings → Updates → Server and choose **Check for updates…**, then install the selected release. For older versions, open **Advanced** and enable **Pin a specific version**. Use **Load Older Versions** to browse earlier releases. **Reinstall Selected Release** is under Advanced → Maintenance.
 
 These controls work without pairing or a running Switchboard. **Stop & Update** stops the owned server first. Installation leaves the server stopped. Reinstallation downloads a fresh runtime, including the architecture required by the app, and preserves the old runtime. Existing data is backed up under the updater folder and migrations are checked against a disposable database copy; incompatible downgrades are refused. Start Switchboard separately when ready. Native installation does not automatically restore data after a failed Start; preserve the current data and backups before deciding on recovery.
 
