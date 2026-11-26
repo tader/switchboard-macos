@@ -5,6 +5,7 @@ import ServiceManagement
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
+    var menuBar: MenuBarController!
     var window: NSWindow?
     var model: Manager!
     var appUpdater: AppUpdater!
@@ -19,6 +20,9 @@ import ServiceManagement
         NSApp.setActivationPolicy(.accessory)
         let main = NSMenu(), application = NSMenu(), edit = NSMenu(), windowMenu = NSMenu()
         let appItem = NSMenuItem(); appItem.submenu = application; main.addItem(appItem)
+        let settingsItem = application.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        application.addItem(.separator())
         application.addItem(withTitle: "Quit Switchboard", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: ""); editItem.submenu = edit; main.addItem(editItem)
         for (title, action, key) in [("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] { edit.addItem(withTitle: title, action: Selector(action), keyEquivalent: key) }
@@ -35,8 +39,7 @@ import ServiceManagement
         }
         if let index = args.firstIndex(of: "--appearance"), index + 1 < args.count { NSApp.appearance = NSAppearance(named: args[index + 1] == "dark" ? .darkAqua : .aqua) }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.target = self; statusItem.button?.action = #selector(clicked)
-        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        menuBar = MenuBarController(statusItem: statusItem, manager: model, showSettings: { [weak self] in self?.showSettings() }, quit: { NSApp.terminate(nil) })
         model.onChange = { [weak self] in self?.refresh() }
         refresh()
         if args.contains("--show-settings") || !model.settings.configured { showSettings() }
@@ -68,41 +71,15 @@ import ServiceManagement
         }
     }
     func refresh() {
-        statusItem.button?.image = NSImage(systemSymbolName: "point.3.connected.trianglepath.dotted", accessibilityDescription: "Switchboard")
-        statusItem.button?.title = model.attention > 0 ? " \(model.attention)" : ""
-        statusItem.button?.setAccessibilityLabel("Switchboard, \(model.phase)\(model.attention > 0 ? ", \(model.attention) connections need sign-in" : "")")
-        statusItem.button?.toolTip = model.phase
+        menuBar.refresh()
+        if model.startConfirmationRequested { showSettings() }
     }
-    @objc func clicked() {
-        if NSApp.currentEvent?.type == .rightMouseUp { showMenu() }
-        else if model.phase == "Running" { model.open() }
-        else { showSettings() }
-    }
-    func showMenu() {
-        let menu = NSMenu()
-        func item(_ title: String, _ selector: Selector, enabled: Bool = true) { let item = menu.addItem(withTitle: title, action: selector, keyEquivalent: ""); item.target = self; item.isEnabled = enabled }
-        item("Open Switchboard", #selector(openBrowser), enabled: model.phase == "Running")
-        if model.attention > 0 { item("Sign in to connections (\(model.attention))", #selector(connections)) }
-        menu.addItem(.separator())
-        item(model.isRunning ? "Stop" : "Start", #selector(toggle), enabled: !model.working)
-        item("Restart", #selector(restart), enabled: model.isRunning && !model.working)
-        item("Settings…", #selector(showSettings))
-        item("Show Logs", #selector(logs))
-        menu.addItem(.separator()); item("Quit Switchboard", #selector(quit))
-        statusItem.menu = menu; statusItem.button?.performClick(nil); statusItem.menu = nil
-    }
-    @objc func openBrowser() { model.open() }
-    @objc func toggle() { if model.isRunning { model.stop() } else { model.start() } }
-    @objc func restart() { model.restart() }
-    @objc func connections() { model.openConnections() }
-    @objc func logs() { model.showLogs() }
-    @objc func quit() { NSApp.terminate(nil) }
     @objc func showSettings() {
         model.refreshLoginStatus()
         if window == nil {
             let view = SettingsView(model: model, appUpdater: appUpdater)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 700), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-            window.title = "Switchboard"; window.contentView = NSHostingView(rootView: view); window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 460, height: 480); if let index = CommandLine.arguments.firstIndex(of: "--window-width"), index + 1 < CommandLine.arguments.count, let width = Double(CommandLine.arguments[index + 1]) { window.setContentSize(NSSize(width: max(460, width), height: 700)) }; window.center(); self.window = window
+            window.title = "Switchboard Settings"; window.contentView = NSHostingView(rootView: view); window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 460, height: 480); if let index = CommandLine.arguments.firstIndex(of: "--window-width"), index + 1 < CommandLine.arguments.count, let width = Double(CommandLine.arguments[index + 1]) { window.setContentSize(NSSize(width: max(460, width), height: 700)) }; window.center(); self.window = window
         }
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); model.log(window?.isVisible == true ? "window-visible" : "window-hidden")
     }

@@ -36,7 +36,8 @@ import Sparkle
         ]
         controller.startUpdater()
     }
-    init(previewVersion: String) {
+    init(previewVersion: String, available: String? = nil, current: Bool = false) {
+        availableVersion = available; isUpToDate = current
         version = previewVersion
         super.init()
         canCheckForUpdates = true

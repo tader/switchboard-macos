@@ -4,18 +4,20 @@ import AppKit
 struct AccountRecoveryView: View {
     @ObservedObject var model: Manager
     @State private var selectedUser = ""
+    @FocusState private var accountFocused: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Recover a password").font(.title2.bold())
             if !model.accountCapabilities.contains("account-recovery") {
                 Text("This server version does not support account recovery from the app. Update Switchboard, then start it again.").fixedSize(horizontal: false, vertical: true)
+                Button("Check for Server Updates…") { model.dismissRecovery(); model.settingsEditor.pane = .general; model.checkReleases() }
             } else {
                 Text("As the owner of this local installation, you can help a user choose a new password.").fixedSize(horizontal: false, vertical: true)
                 if !model.accountUsers.isEmpty {
                     Picker("Account", selection: $selectedUser) {
                         Text("Choose an account").tag("")
                         ForEach(model.accountUsers) { user in Text(user.username).tag(user.id) }
-                    }.disabled(model.accountBusy)
+                    }.disabled(model.accountBusy).focused($accountFocused)
                     Text("Your Mac will ask you to authenticate. A one-time link then opens in your browser and expires after 10 minutes. Completing recovery signs this user out of existing sessions; their data is kept.").font(.callout).foregroundStyle(Color(nsColor: .labelColor).opacity(0.78)).fixedSize(horizontal: false, vertical: true)
                 } else if model.accountBusy { ProgressView("Loading accounts…").controlSize(.small) }
                 else { Text("No enabled local accounts are available.") }
@@ -36,9 +38,9 @@ struct AccountRecoveryView: View {
                 }
             }
         }.padding(24).frame(width: 390).background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { selectedUser = model.accountUsers.first?.id ?? "" }
+        .onAppear { accountFocused = true }
         .onChange(of: model.accountUsers) { _, users in
-            if !users.contains(where: { $0.id == selectedUser }) { selectedUser = users.first?.id ?? "" }
+            if !users.contains(where: { $0.id == selectedUser }) { selectedUser = "" }
         }
     }
 }
