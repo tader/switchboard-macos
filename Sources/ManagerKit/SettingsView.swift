@@ -116,7 +116,7 @@ public struct SettingsView: View {
     }
     var updatesSection: some View {
         section("Updates") {
-            VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 section("Mac app") {
                     updateHint("The menu bar app on your Mac.")
                     versionRow(installed: appUpdater.version, available: appUpdater.availableVersion, current: appUpdater.isUpToDate)
@@ -142,34 +142,44 @@ public struct SettingsView: View {
                             Picker("Update channel", selection: Binding(get: { model.settings.releaseChannel ?? "stable" }, set: { model.savePreferences(channel: $0) })) {
                                 Text("Stable (recommended)").tag("stable")
                                 Text("Development").tag("development")
-                            }.labelsHidden().frame(maxWidth: .infinity).disabled(model.working)
+                            }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading).disabled(model.working)
                         }
                         if model.settings.releaseChannel == "development" { updateHint("Early releases may be less reliable.") }
                     }
                     releaseActions
                 }
-            }
+            }.fixedSize(horizontal: false, vertical: true)
             tokenSettings
         }
     }
     private func versionRow(installed: String?, available: String?, current: Bool) -> some View {
-        HStack {
-            if let installed { Text("Installed: \(installed)").textSelection(.enabled) }
-            if current { Label("Up to date", systemImage: "checkmark.circle") }
-            else if let available { Text("Available: \(available)").textSelection(.enabled) }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top) {
+                versionValues(installed: installed, available: available, current: current)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                versionValues(installed: installed, available: available, current: current)
+            }
         }
+    }
+    @ViewBuilder private func versionValues(installed: String?, available: String?, current: Bool) -> some View {
+        if let installed { Text("Installed: \(installed)").textSelection(.enabled) }
+        if current { Label("Up to date", systemImage: "checkmark.circle") }
+        else if let available { Text("Available: \(available)").textSelection(.enabled) }
     }
     private var tokenSettings: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("GitHub token for higher limits and repository access (optional)").font(.headline)
+            Text("GitHub token for higher limits and repository access (optional)").font(.headline).fixedSize(horizontal: false, vertical: true)
             if tokenConfigured == true {
                 Button("Remove Token") { changeToken(remove: true) }
             } else if tokenConfigured == false {
-                SecureField("GitHub token", text: $tokenDraft).textFieldStyle(.roundedBorder).accessibilityIdentifier("github-token")
                 HStack {
-                    Button("Save Token") { changeToken(remove: false) }.disabled(tokenDraft.isEmpty)
-                    Link("Create a token", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
+                    SecureField("GitHub token", text: $tokenDraft).textFieldStyle(.roundedBorder).accessibilityIdentifier("github-token")
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                    Button("Save Token") { changeToken(remove: false) }.disabled(tokenDraft.isEmpty).fixedSize()
                 }
+                Link("Create GitHub token…", destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!)
+                    .buttonStyle(.plain).foregroundStyle(Color(nsColor: .linkColor))
             }
             if let tokenMessage { Text(tokenMessage).font(.callout).textSelection(.enabled) }
         }.disabled(tokenBusy || model.working || model.checkingReleases)
