@@ -103,6 +103,6 @@ Merging a Release Please PR builds, signs and notarizes the app for Apple Silico
 
 ### Optional GitHub token
 
-In **Settings → Updates**, save a GitHub personal access token to raise API limits for server release downloads. Public repositories require no additional permissions. The token stays in macOS Keychain and can be replaced or removed there in Settings.
+In **Settings → Updates**, save a GitHub personal access token to raise API limits for server release downloads. Public repositories require no additional permissions. The token stays in macOS Keychain. When a token is stored, Settings shows only **Remove Token**; remove it before entering a replacement. When no token is stored, the masked input and **Save Token** appear on the same row, with a **Create GitHub token…** link below.
 
 The local server receives the token at its next start, exclusively as a rate-limit fallback for plugin catalog browsing and installation, including dependencies. Stop and start the server after changing the token. Server-side plugin updates and server updates do not use this token. This server behavior requires a runtime release containing installation-token support; older runtimes ignore it. The token does not create a GitHub connection.
