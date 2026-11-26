@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.5.0...switchboard-macos-v0.6.0) (2026-11-26)
+
+
+### Features
+
+* **settings:** refine General and Advanced flows and menu-bar sign-in status ([e3937bd](https://github.com/tader/switchboard-macos/commit/e3937bd695f1e67c09b76b093e83bdb6bb7874e0))
+
 ## [0.5.0](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.4.0...switchboard-macos-v0.5.0) (2026-11-25)
 
 
