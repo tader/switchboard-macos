@@ -316,13 +316,32 @@ import LocalAuthentication
     public func save(_ proposed: Settings, copyData: Bool = false, copyState: Bool = false) throws {
         guard canEditPaths else { throw ManagerError.invalid("Stop Switchboard before changing settings.") }
         try proposed.validate()
+        let movingData = proposed.dataPath != settings.dataPath
+        let movingState = proposed.statePath != settings.statePath
+        let ownership = RuntimeSelection()
+        defer { withExtendedLifetime(ownership) {} }
+        if movingData || movingState {
+            let state = URL(fileURLWithPath: settings.statePath)
+            let data = URL(fileURLWithPath: settings.dataPath)
+            if FileManager.default.fileExists(atPath: state.path) { try ownership.acquire(state.appendingPathComponent("controller-lease.db")) }
+            if FileManager.default.fileExists(atPath: data.path) { try ownership.acquire(data.appendingPathComponent(".server-lease.db")) }
+            if movingData && FileManager.default.fileExists(atPath: data.path) && !copyData {
+                throw ManagerError.invalid("Choose Copy and verify to relocate existing data.")
+            }
+            if movingState && FileManager.default.fileExists(atPath: state.path) && !copyState {
+                throw ManagerError.invalid("Choose Copy and verify to relocate updater state.")
+            }
+            if FileManager.default.fileExists(atPath: data.appendingPathComponent(".server-lock").path) ||
+                FileManager.default.fileExists(atPath: state.appendingPathComponent("controller.lock").path) {
+                throw ManagerError.invalid("Stop the server and updater before copying folders.")
+            }
+            try RuntimeSelection.retirePreviews(settings, destinations: [proposed.dataPath, proposed.statePath])
+        }
         var next = proposed
-        if proposed.dataPath != settings.dataPath && FileManager.default.fileExists(atPath: settings.dataPath) {
-            guard copyData else { throw ManagerError.invalid("Choose Copy and verify to relocate existing data.") }
+        if movingData && FileManager.default.fileExists(atPath: settings.dataPath) {
             try copyOrReconcile(from: settings.dataPath, to: proposed.dataPath)
         }
-        if proposed.statePath != settings.statePath && FileManager.default.fileExists(atPath: settings.statePath) {
-            guard copyState else { throw ManagerError.invalid("Choose Copy and verify to relocate updater state.") }
+        if movingState && FileManager.default.fileExists(atPath: settings.statePath) {
             try copyOrReconcile(from: settings.statePath, to: proposed.statePath)
             if let runtime = settings.runtimePath, runtime.hasPrefix(settings.statePath + "/") { next.runtimePath = proposed.statePath + runtime.dropFirst(settings.statePath.count) }
         }
@@ -389,9 +408,7 @@ import LocalAuthentication
         }
     }
     private func launch() throws {
-        let current = URL(fileURLWithPath: settings.statePath).appendingPathComponent("current.json")
-        let pointer = FileManager.default.fileExists(atPath: current.path) ? try JSONDecoder().decode([String: String].self, from: Data(contentsOf: current))["release"] : nil
-        guard let runtime = pointer ?? settings.runtimePath else { throw ManagerError.invalid("Install a runtime first.") }
+        guard let runtime = try RuntimeSelection.selectedRuntime(settings) else { throw ManagerError.invalid("Install a runtime first.") }
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: URL(fileURLWithPath: runtime).appendingPathComponent("runtime.json")))
         try manifest.validate(version: manifest.version, revision: manifest.revision, arch: RuntimeInstaller.arch)
         try FileManager.default.createDirectory(atPath: settings.dataPath, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -416,7 +433,7 @@ import LocalAuthentication
         var serverEnv = ["SWITCHBOARD_HOST": settings.host, "SWITCHBOARD_PORT": String(settings.port), "SWITCHBOARD_PUBLIC_URL": settings.appURL, "SWITCHBOARD_LOCAL_ACCOUNT_RECOVERY": "1"]
         if let token = try runtimeTokenReader() { serverEnv["SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN"] = token }
         try process.run(); supervisor = process; input = incoming.fileHandleForWriting
-        send(["action": "start", "settings": ["instance": "local-manager", "mode": "runtime", "dataDir": settings.dataPath, "stateDir": settings.statePath, "initialRelease": runtime, "appUrl": settings.appURL, "env": serverEnv]])
+        send(["action": "start", "settings": ["instance": "local-manager", "mode": "runtime", "dataDir": settings.dataPath, "stateDir": settings.statePath, "initialRelease": runtime, "runtimePreviewLifecycle": true, "appUrl": settings.appURL, "env": serverEnv]])
         poll = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor [weak self] in self?.expireStatus(); self?.send(["action": "status"]) } }
     }
     public func log(_ event: String) {
