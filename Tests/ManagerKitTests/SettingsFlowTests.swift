@@ -11,7 +11,7 @@ final class SettingsFlowTests: XCTestCase {
         for folder in [data, state, occupied, runtime.appendingPathComponent("bin")] { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
         try Data("{\"activityPreviewStore\":1}".utf8).write(to: runtime.appendingPathComponent("build-info.json"))
         let helper = runtime.appendingPathComponent("bin/node")
-        try Data("#!/bin/sh\ntouch \"$3/retirement-called\"\n".utf8).write(to: helper)
+        try Data("#!/bin/sh\ntouch \"$3/retirement-called\"\nrm -f \"$3.activity-previews/preview-fixture.enc\"\n".utf8).write(to: helper)
         try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
         let control = state.appendingPathComponent("activity-preview-control.json")
         let bytes = Data("{\"epoch\":\"unchanged\",\"stores\":[{\"retired\":false}]}".utf8)
@@ -30,6 +30,24 @@ final class SettingsFlowTests: XCTestCase {
         XCTAssertEqual(try Settings.load(file), settings)
         XCTAssertEqual(try String(contentsOf: occupied.appendingPathComponent("sentinel"), encoding: .utf8), "unrelated")
         try fm.removeItem(at: occupied)
+        let previewStore = root.appendingPathComponent("state.activity-previews")
+        try fm.createDirectory(at: previewStore, withIntermediateDirectories: false)
+        let preview = previewStore.appendingPathComponent("preview-fixture.enc")
+        let previewBytes = Data("synthetic ciphertext".utf8)
+        try previewBytes.write(to: preview)
+        let regularFile = root.appendingPathComponent("regular-file")
+        try Data().write(to: regularFile)
+        next.statePath = regularFile.appendingPathComponent("nested/updater").path
+        XCTAssertThrowsError(try manager.save(next, copyData: true, copyState: true)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("inside an existing folder"))
+        }
+        XCTAssertFalse(fm.fileExists(atPath: state.appendingPathComponent("retirement-called").path))
+        XCTAssertFalse(fm.fileExists(atPath: next.dataPath))
+        XCTAssertEqual(try Data(contentsOf: control), bytes)
+        XCTAssertEqual(try Data(contentsOf: preview), previewBytes)
+        XCTAssertEqual(try Settings.load(file), settings)
+
+        next.statePath = occupied.path
         try fm.createSymbolicLink(atPath: data.appendingPathComponent("external-link").path, withDestinationPath: runtime.path)
         XCTAssertThrowsError(try manager.save(next, copyData: true, copyState: true))
         XCTAssertFalse(fm.fileExists(atPath: state.appendingPathComponent("retirement-called").path))

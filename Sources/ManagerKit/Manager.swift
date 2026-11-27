@@ -313,6 +313,12 @@ import LocalAuthentication
                 throw ManagerError.invalid("The destination must be separate from both original folders.")
             }
         }
+        // copyItem requires an existing directory at the end of the parent chain.
+        let parent = URL(fileURLWithPath: target).deletingLastPathComponent()
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw ManagerError.invalid("Choose a destination inside an existing folder.")
+        }
         if let receipt = relocationReceipts[target], receipt.source == source {
             guard try Relocation.inventory(URL(fileURLWithPath: source)) == receipt.originalInventory,
                   try Relocation.inventory(URL(fileURLWithPath: target)) == receipt.copiedInventory else {
