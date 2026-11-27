@@ -254,7 +254,11 @@ import LocalAuthentication
             }
             do {
                 try original.validate()
-                let download = Task.detached { try await RuntimeInstaller.install(release: release, statePath: original.statePath) { progress in Task { @MainActor [weak self = self] in self?.reportProgress(progress) } } }
+                let installer = runtimeInstaller
+                let download = Task.detached {
+                    if let installer { return try await installer(original.statePath) }
+                    return try await RuntimeInstaller.install(release: release, statePath: original.statePath) { progress in Task { @MainActor [weak self = self] in self?.reportProgress(progress) } }
+                }
                 let path = try await withTaskCancellationHandler(operation: { try await download.value }, onCancel: { download.cancel() })
                 try Task.checkCancellation()
                 phase = "Verifying data and selecting runtime…"; onChange?()
