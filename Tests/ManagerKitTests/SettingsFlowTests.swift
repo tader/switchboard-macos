@@ -3,6 +3,33 @@ import AppKit
 @testable import ManagerKit
 
 final class SettingsFlowTests: XCTestCase {
+    @MainActor func testInvalidSecondDestinationDoesNotRetirePreviewsOrCopyFirst() throws {
+        let fm = FileManager.default, root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        let data = root.appendingPathComponent("data"), state = root.appendingPathComponent("state")
+        let runtime = root.appendingPathComponent("runtime"), occupied = root.appendingPathComponent("occupied")
+        for folder in [data, state, occupied, runtime.appendingPathComponent("bin")] { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
+        try Data("{\"activityPreviewStore\":1}".utf8).write(to: runtime.appendingPathComponent("build-info.json"))
+        let helper = runtime.appendingPathComponent("bin/node")
+        try Data("#!/bin/sh\ntouch \"$3/retirement-called\"\n".utf8).write(to: helper)
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+        let control = state.appendingPathComponent("activity-preview-control.json")
+        let bytes = Data("{\"epoch\":\"unchanged\",\"stores\":[{\"retired\":false}]}".utf8)
+        try bytes.write(to: control)
+        try Data("unrelated".utf8).write(to: occupied.appendingPathComponent("sentinel"))
+        var settings = Settings(); settings.dataPath = data.path; settings.statePath = state.path; settings.runtimePath = runtime.path
+        let file = root.appendingPathComponent("settings.json"); try settings.save(file)
+        let manager = Manager(settingsURL: file)
+        var next = settings; next.dataPath = root.appendingPathComponent("new-data").path; next.statePath = occupied.path
+        XCTAssertThrowsError(try manager.save(next, copyData: true, copyState: true)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("new, separate"))
+        }
+        XCTAssertFalse(fm.fileExists(atPath: state.appendingPathComponent("retirement-called").path))
+        XCTAssertFalse(fm.fileExists(atPath: next.dataPath))
+        XCTAssertEqual(try Data(contentsOf: control), bytes)
+        XCTAssertEqual(try Settings.load(file), settings)
+        XCTAssertEqual(try String(contentsOf: occupied.appendingPathComponent("sentinel"), encoding: .utf8), "unrelated")
+    }
     @MainActor private func fixture(at file: URL) throws -> Manager {
         var settings = Settings()
         settings.dataPath = file.deletingLastPathComponent().appendingPathComponent("data").path

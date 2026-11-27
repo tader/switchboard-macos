@@ -304,6 +304,24 @@ import LocalAuthentication
         var copiedInventory: [String: String]
     }
     private var relocationReceipts: [String: RelocationReceipt] = [:]
+    private func validateRelocation(from source: String, to target: String) throws {
+        let canonicalSource = try Settings.canonical(source), canonicalTarget = try Settings.canonical(target)
+        guard canonicalSource != canonicalTarget else { throw ManagerError.invalid("The destination must be a new, separate folder.") }
+        for original in [settings.dataPath, settings.statePath] {
+            let path = try Settings.canonical(original)
+            guard canonicalTarget != path, !canonicalTarget.hasPrefix(path + "/"), !path.hasPrefix(canonicalTarget + "/") else {
+                throw ManagerError.invalid("The destination must be separate from both original folders.")
+            }
+        }
+        if let receipt = relocationReceipts[target], receipt.source == source {
+            guard try Relocation.inventory(URL(fileURLWithPath: source)) == receipt.originalInventory,
+                  try Relocation.inventory(URL(fileURLWithPath: target)) == receipt.copiedInventory else {
+                throw ManagerError.invalid("A retained relocation copy has changed. Choose a new, separate destination before retrying.")
+            }
+        } else if FileManager.default.fileExists(atPath: target) {
+            throw ManagerError.invalid("The destination must be a new, separate folder.")
+        }
+    }
     private func copyOrReconcile(from source: String, to target: String) throws {
         if let receipt = relocationReceipts[target], receipt.source == source {
             guard try Relocation.inventory(URL(fileURLWithPath: source)) == receipt.originalInventory,
@@ -339,6 +357,9 @@ import LocalAuthentication
                 FileManager.default.fileExists(atPath: state.appendingPathComponent("controller.lock").path) {
                 throw ManagerError.invalid("Stop the server and updater before copying folders.")
             }
+            // Reject either occupied/changed destination before retiring any live preview.
+            if movingData && FileManager.default.fileExists(atPath: data.path) { try validateRelocation(from: settings.dataPath, to: proposed.dataPath) }
+            if movingState && FileManager.default.fileExists(atPath: state.path) { try validateRelocation(from: settings.statePath, to: proposed.statePath) }
             try RuntimeSelection.retirePreviews(settings, destinations: [proposed.dataPath, proposed.statePath])
         }
         var next = proposed
