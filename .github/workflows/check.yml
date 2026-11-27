@@ -35,27 +35,18 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/affected-core"
           gh release download v0.17.0 --repo tader/switchboard -p 'runtime-darwin-${{ matrix.runtime_arch }}.json' -p 'switchboard-runtime-darwin-${{ matrix.runtime_arch }}.tar.gz' -D "$RUNNER_TEMP/affected-core"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: tader/switchboard
-          ref: f759fbc7dbfd08f60ac85a848c1f10f35b0b70cd
-          path: .core-repair
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with: {node-version: '24'}
-      - name: Build the pinned repair runtime archive
-        working-directory: .core-repair
+      - name: Fetch the expected production manifest
+        env: {GH_TOKEN: '${{ github.token }}'}
         run: |
-          npm ci
-          npm ci --prefix web
-          npm run build --prefix web
-          bash scripts/download-runtime-node.sh '${{ matrix.runtime_arch }}' "$RUNNER_TEMP/node"
-          python3 scripts/package-runtime.py --node "$RUNNER_TEMP/node/node-v24.22.3-darwin-${{ matrix.runtime_arch }}/bin/node" --arch '${{ matrix.runtime_arch }}' --revision "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/fixed-core"
+          mkdir -p "$RUNNER_TEMP/fixed-core"
+          gh release download v0.17.1 --repo tader/switchboard -p 'runtime-darwin-${{ matrix.runtime_arch }}.json' -D "$RUNNER_TEMP/fixed-core"
       - run: swift test
         env:
           SWITCHBOARD_TEST_RUNTIME_ASSETS: ${{ runner.temp }}/core
           SWITCHBOARD_TEST_FIXED_RUNTIME_ASSETS: ${{ runner.temp }}/fixed-core
           SWITCHBOARD_TEST_AFFECTED_RUNTIME_ASSETS: ${{ runner.temp }}/affected-core
+          SWITCHBOARD_REPAIR_BROWSER_SCRIPT: ${{ github.workspace }}/Tests/reveal-repair.mjs
+          SWITCHBOARD_REPAIR_SCREENSHOTS: ${{ runner.temp }}/repair-screenshots
           SWITCHBOARD_UI_SNAPSHOT_DIR: ${{ runner.temp }}/ui
       - run: bash scripts/bundle.sh '${{ matrix.arch }}'
       - run: python3 scripts/test-app-update-configuration.py
@@ -69,3 +60,8 @@ jobs:
           path: .dist/*-unsigned.zip
           include-hidden-files: true
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: repair-screenshots-${{ matrix.arch }}
+          path: ${{ runner.temp }}/repair-screenshots

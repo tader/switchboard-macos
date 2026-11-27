@@ -10,35 +10,28 @@ final class DesktopUpdateTests: XCTestCase {
         defer { try? fm.removeItem(at: root) }
         let assets = URL(fileURLWithPath: directory)
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: assets.appendingPathComponent("runtime-darwin-\(RuntimeInstaller.arch).json")))
-        let archive = try Data(contentsOf: assets.appendingPathComponent(manifest.archive))
+        XCTAssertEqual(manifest.version, "0.17.1")
         let state = root.appendingPathComponent("state"), data = root.appendingPathComponent("data")
-        let fixedRuntime = try RuntimeInstaller.extract(archive: archive, manifest: manifest, statePath: state.path)
-        guard try RuntimeSelection.supportsPreviews(fixedRuntime) else { return XCTFail("The repair fixture must support preview storage.") }
-        let affectedRuntime: String?
-        if let directory = ProcessInfo.processInfo.environment["SWITCHBOARD_TEST_AFFECTED_RUNTIME_ASSETS"] {
-            let old = URL(fileURLWithPath: directory)
-            let metadata = try Data(contentsOf: old.appendingPathComponent("runtime-darwin-\(RuntimeInstaller.arch).json"))
-            let affected = try JSONDecoder().decode(RuntimeManifest.self, from: metadata)
-            XCTAssertEqual(affected.version, "0.17.0")
-            affectedRuntime = try RuntimeInstaller.extract(archive: Data(contentsOf: old.appendingPathComponent(affected.archive)), manifest: affected, statePath: state.path)
-        } else {
-            affectedRuntime = nil
-        }
+        let affectedDirectory = try XCTUnwrap(ProcessInfo.processInfo.environment["SWITCHBOARD_TEST_AFFECTED_RUNTIME_ASSETS"])
+        let old = URL(fileURLWithPath: affectedDirectory)
+        let metadata = try Data(contentsOf: old.appendingPathComponent("runtime-darwin-\(RuntimeInstaller.arch).json"))
+        let affected = try JSONDecoder().decode(RuntimeManifest.self, from: metadata)
+        XCTAssertEqual(affected.version, "0.17.0")
+        let affectedRuntime = try RuntimeInstaller.extract(archive: Data(contentsOf: old.appendingPathComponent(affected.archive)), manifest: affected, statePath: state.path)
         // Existing v0.17-style installation: retained data/policy, no preview binding.
         try fm.createDirectory(at: data, withIntermediateDirectories: true)
-        let seed = Process(); seed.executableURL = URL(fileURLWithPath: affectedRuntime ?? fixedRuntime).appendingPathComponent("bin/node")
-        seed.currentDirectoryURL = URL(fileURLWithPath: affectedRuntime ?? fixedRuntime)
+        let seed = Process(); seed.executableURL = URL(fileURLWithPath: affectedRuntime).appendingPathComponent("bin/node")
+        seed.currentDirectoryURL = URL(fileURLWithPath: affectedRuntime)
         seed.environment = ["PATH": "/usr/bin:/bin", "SWITCHBOARD_DATA_DIR": data.path]
-        seed.arguments = ["--input-type=module", "-e", "const d=await import('./server/db.ts');d.initDb();const c=await import('./server/crypto.ts');c.initKey();const u=await import('./server/users.ts');const owner=u.createUser('synthetic-owner','admin');d.run('UPDATE users SET password_hash = ? WHERE id = ?',c.hashPassword('synthetic-test-password'),owner.id);const session=u.createSession(owner.id);(await import('./server/activity-output.ts')).setOutputRetention(9);(await import('node:fs')).writeFileSync(process.argv[1],session);d.db.close()", root.appendingPathComponent("session").path]
+        seed.arguments = ["--input-type=module", "-e", "const d=await import('./server/db.ts');d.initDb();const c=await import('./server/crypto.ts');c.initKey();const u=await import('./server/users.ts');const owner=u.createUser('synthetic-repair-owner','admin');d.run('UPDATE users SET password_hash = ? WHERE id = ?',c.hashPassword('synthetic-test-password'),owner.id);const session=u.createSession(owner.id);(await import('./server/activity-output.ts')).setOutputRetention(9);(await import('node:fs')).writeFileSync(process.argv[1],session);d.db.close()", root.appendingPathComponent("session").path]
         seed.standardOutput = FileHandle.nullDevice; seed.standardError = FileHandle.nullDevice
         try seed.run(); seed.waitUntilExit(); XCTAssertEqual(seed.terminationStatus, 0)
         let session = try String(contentsOf: root.appendingPathComponent("session"), encoding: .utf8)
         var settings = Settings(); settings.dataPath = data.path; settings.statePath = state.path
-        settings.runtimePath = affectedRuntime ?? fixedRuntime; settings.configured = true; settings.port = Int.random(in: 20000...50000)
+        settings.runtimePath = affectedRuntime; settings.configured = true; settings.port = Int.random(in: 20000...50000)
         settings.browserURL = "http://127.0.0.1:\(settings.port)"
         let file = root.appendingPathComponent("settings.json"); try settings.save(file)
         let manager = Manager(settingsURL: file)
-        manager.runtimeInstaller = { state in try RuntimeInstaller.extract(archive: archive, manifest: manifest, statePath: state) }
         func waitForReady() async throws {
             let deadline = Date().addingTimeInterval(60)
             while !manager.canOpenBrowser {
@@ -62,11 +55,9 @@ final class DesktopUpdateTests: XCTestCase {
             XCTAssertEqual(capture["reason"] as? String, reason)
         }
         do {
-            if affectedRuntime != nil {
-                manager.start()
-                try await waitForReady()
-                try await checkPolicy(reason: "restore-unsupported")
-            }
+            manager.start()
+            try await waitForReady()
+            try await checkPolicy(reason: "restore-unsupported")
             manager.installRuntime(RuntimeRelease(tag: "v" + manifest.version, prerelease: false, available: true))
             // The old runtime may still be ready while the manager stops it for installation.
             let deadline = Date().addingTimeInterval(60)
@@ -77,6 +68,38 @@ final class DesktopUpdateTests: XCTestCase {
             }
             try await waitForReady()
             try await checkPolicy(reason: "ready")
+            let selected = URL(fileURLWithPath: try XCTUnwrap(manager.settings.runtimePath))
+            let installed = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: selected.appendingPathComponent("runtime.json")))
+            XCTAssertEqual(installed, manifest)
+            let browserScript = try XCTUnwrap(ProcessInfo.processInfo.environment["SWITCHBOARD_REPAIR_BROWSER_SCRIPT"])
+            let screenshots = try XCTUnwrap(ProcessInfo.processInfo.environment["SWITCHBOARD_REPAIR_SCREENSHOTS"])
+            func reveal(_ phase: String) async throws {
+                let browser = Process()
+                browser.executableURL = selected.appendingPathComponent("bin/node")
+                browser.currentDirectoryURL = selected
+                browser.environment = ProcessInfo.processInfo.environment.merging(["SWITCHBOARD_DATA_DIR": data.path]) { _, new in new }
+                browser.arguments = [browserScript, phase, settings.browserURL, state.path, root.appendingPathComponent("session").path, screenshots]
+                try browser.run()
+                let deadline = Date().addingTimeInterval(120)
+                while browser.isRunning {
+                    if Date() > deadline {
+                        browser.terminate()
+                        throw ManagerError.invalid("Activity browser rehearsal timed out.")
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                XCTAssertEqual(browser.terminationStatus, 0, "Activity browser rehearsal failed.")
+            }
+            try await reveal("after-repair")
+            manager.stop()
+            let restartDeadline = Date().addingTimeInterval(20)
+            while manager.isRunning || manager.working {
+                if Date() > restartDeadline { throw ManagerError.invalid("The server did not stop for restart.") }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            manager.start()
+            try await waitForReady()
+            try await reveal("after-restart")
         } catch {
             manager.stop()
             while manager.isRunning || manager.working { try await Task.sleep(for: .milliseconds(100)) }
