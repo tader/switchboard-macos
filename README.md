@@ -57,6 +57,8 @@ Settings are owner-readable only. The manager keeps its narrow updater credentia
 
 ## Updates, backups and recovery
 
+If Activity retention still shows the installation warning after updating the Mac app, open **Advanced → Maintenance** and choose **Reinstall Selected Release…**. Use the latest compatible server. Switchboard starts it automatically, keeps your saved retention setting, and resumes capture for supported requests once preview storage is ready.
+
 Settings → Updates → Server follows **Stable (recommended)** by default. Choose **Development** to follow published prereleases with compatible macOS runtime assets. **Check for updates…** resolves the latest compatible release; installation starts only when you choose it. To select a particular version, open **Advanced**, enable **Pin a specific version**, and choose a release. Disable pinning to return to your channel. Download progress shows actual bytes and a percentage when the total size is available, followed by verification and installation stages. Installation preserves your data and starts the selected server automatically. Cancellation is available before the final selection commit.
 
 Backups and the owner-only `journal.json`, `history/` and `last-success.json` are in your updater folder; **Show Logs** opens that folder. Keep independent off-device backups of the entire data folder and updater folder while stopped. Include `secret.key`, the database, installed extensions, extension state and browser profiles together. Snapshots contain credentials; keep them private and leave room for full copies.
