@@ -248,7 +248,10 @@ import LocalAuthentication
         error = nil; working = true; phase = "Downloading runtime…"; onChange?()
         let original = settings, file = settingsURL
         installTask = Task {
-            defer { downloadProgress = nil; installTask = nil; working = false; phase = "Stopped"; onChange?(); onStopped?() }
+            defer {
+                downloadProgress = nil; installTask = nil
+                if !isRunning { working = false; phase = "Stopped"; onChange?(); onStopped?() }
+            }
             do {
                 try original.validate()
                 let download = Task.detached { try await RuntimeInstaller.install(release: release, statePath: original.statePath) { progress in Task { @MainActor [weak self = self] in self?.reportProgress(progress) } } }
@@ -258,7 +261,10 @@ import LocalAuthentication
                 // Selection is an indivisible operation: Quit waits for completion.
                 let commit = Task.detached { try RuntimeSelection().select(runtime: path, settings: original, settingsURL: file) }
                 settings = try await commit.value
-                paired = false; eligible = false; updateState = "Installed. Start Switchboard when ready."
+                paired = false; eligible = false; updateState = ""
+                try Task.checkCancellation()
+                downloadProgress = nil; phase = "Starting…"; onChange?()
+                try launch()
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
     }
