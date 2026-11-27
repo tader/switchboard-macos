@@ -98,6 +98,10 @@ public enum Relocation {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         }
         if oldState != newState {
+            // The source was retired under its leases before the copy. The
+            // destination must provision its own installation identity.
+            let control = root.appendingPathComponent("activity-preview-control.json")
+            if FileManager.default.fileExists(atPath: control.path) { try FileManager.default.removeItem(at: control) }
             for name in ["child.json", "controller.lock", "controller-lease.db", "controller-lease.db-journal"] { try? FileManager.default.removeItem(at: root.appendingPathComponent(name)) }
         }
     }

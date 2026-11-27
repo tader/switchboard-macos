@@ -87,11 +87,11 @@ public struct SettingsView: View {
             Button("Cancel", role: .cancel) { model.dismissRecovery() }
         } message: { Text("Your Advanced changes have not been saved. Choose which settings Switchboard should use.") }
         .confirmationDialog("Install selected server release?", isPresented: Binding(get: { pendingInstall != nil }, set: { if !$0 { pendingInstall = nil } }), titleVisibility: .visible) {
-            Button(model.isRunning ? "Stop & Install" : "Install") {
+            Button("Install & Start") {
                 if let release = pendingInstall { model.installRuntime(release) }; pendingInstall = nil
             }
             Button("Cancel", role: .cancel) { pendingInstall = nil }
-        } message: { Text("Keeps your data. Stops the server if running and leaves it stopped after installation.") }
+        } message: { Text("Your data is kept. Switchboard starts automatically after installation. If the server is running, it will be unavailable during installation.") }
     }
     private func announce(_ text: String) {
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
@@ -347,7 +347,7 @@ public struct SettingsView: View {
             section("Maintenance") {
                 Text(model.runtimeDescription).font(.callout).textSelection(.enabled)
                 Button("Show Logs and Backups") { model.showLogs() }
-                if let release = model.preferredRelease { Button(model.isRunning ? "Stop & Reinstall…" : "Reinstall Selected Release…") { pendingInstall = release }.disabled(model.working) }
+                if let release = model.preferredRelease { Button("Reinstall Selected Release…") { pendingInstall = release }.disabled(model.working) }
                 Button("Recover Server Lock…") { confirmLockRecovery = true }.disabled(model.isRunning || model.working)
                     .confirmationDialog("Recover Server Lock?", isPresented: $confirmLockRecovery, titleVisibility: .visible) {
                         Button("Recover Server Lock") { model.recoverServerLock() }

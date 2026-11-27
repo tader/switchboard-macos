@@ -40,6 +40,28 @@ final class RuntimeSelectionTests: XCTestCase {
         XCTAssertEqual(current["release"], runtime.path)
         XCTAssertFalse(fm.fileExists(atPath: state.appendingPathComponent("runtime-install.json").path))
     }
+    func testInterruptedDowngradeCannotCommitWhileLivePreviewsNeedRetirement() throws {
+        let fm = FileManager.default, root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        let state = root.appendingPathComponent("state")
+        let older = state.appendingPathComponent("releases/older")
+        let capable = state.appendingPathComponent("releases/capable")
+        try fm.createDirectory(at: older, withIntermediateDirectories: true)
+        try fm.createDirectory(at: capable, withIntermediateDirectories: true)
+        let manifest = RuntimeManifest(origin: "tader/switchboard", version: "1.0.0", revision: String(repeating: "a", count: 40), protocol: 1, platform: "darwin", arch: RuntimeInstaller.arch, archive: "switchboard-runtime-darwin-\(RuntimeInstaller.arch).tar.gz", sha256: String(repeating: "b", count: 64))
+        try JSONEncoder().encode(manifest).write(to: older.appendingPathComponent("runtime.json"))
+        try RuntimeSelection.atomic(["release": capable.path], to: state.appendingPathComponent("current.json"))
+        try RuntimeSelection.atomic(["stores": [["retired": false]]], to: state.appendingPathComponent("activity-preview-control.json"))
+        var settings = Settings(); settings.statePath = state.path; settings.dataPath = root.appendingPathComponent("data").path
+        settings.runtimePath = capable.path
+        var next = settings; next.runtimePath = older.path; next.configured = true
+        let journal = state.appendingPathComponent("runtime-install.json")
+        try RuntimeSelection.atomic(RuntimeSelection.Pending(runtime: older.path, settings: next), to: journal)
+        XCTAssertThrowsError(try RuntimeSelection.recover(settingsURL: root.appendingPathComponent("settings.json"), settings: &settings))
+        XCTAssertEqual(try RuntimeSelection.selectedRuntime(settings), capable.path)
+        XCTAssertTrue(fm.fileExists(atPath: journal.path))
+    }
+
     func testArchitectureMismatchExplainsRepair() throws {
         let other = RuntimeInstaller.arch == "arm64" ? "x64" : "arm64"
         let m = RuntimeManifest(origin: "tader/switchboard", version: "1.0.0", revision: String(repeating: "a", count: 40), protocol: 1, platform: "darwin", arch: other, archive: "switchboard-runtime-darwin-\(other).tar.gz", sha256: String(repeating: "b", count: 64))

@@ -18,6 +18,44 @@ final class RuntimeSelection {
         let fd = open(file.deletingLastPathComponent().path, O_RDONLY); if fd >= 0 { defer { close(fd) }; _ = fsync(fd) }
     }
     struct Pending: Codable { let runtime: String; let settings: Settings }
+    static func selectedRuntime(_ settings: Settings) throws -> String? {
+        let current = URL(fileURLWithPath: settings.statePath).appendingPathComponent("current.json")
+        guard FileManager.default.fileExists(atPath: current.path) else { return settings.runtimePath }
+        guard let selected = try JSONDecoder().decode([String: String].self, from: Data(contentsOf: current))["release"] else {
+            throw ManagerError.invalid("The selected runtime metadata needs repair.")
+        }
+        return selected
+    }
+    static func supportsPreviews(_ runtime: String) throws -> Bool {
+        let build = URL(fileURLWithPath: runtime).appendingPathComponent("build-info.json")
+        guard FileManager.default.fileExists(atPath: build.path) else { return false }
+        let info = try JSONSerialization.jsonObject(with: Data(contentsOf: build)) as? [String: Any]
+        return info?["activityPreviewStore"] as? Int == 1
+    }
+    static func retirePreviews(_ settings: Settings, destinations: [String] = []) throws {
+        struct Binding: Decodable { let retired: Bool? }
+        struct Control: Decodable { let stores: [Binding] }
+        let control = URL(fileURLWithPath: settings.statePath).appendingPathComponent("activity-preview-control.json")
+        guard FileManager.default.fileExists(atPath: control.path) else { return }
+        let bindings = try JSONDecoder().decode(Control.self, from: Data(contentsOf: control)).stores
+        guard bindings.contains(where: { $0.retired != true }) else { return }
+        guard let runtime = try selectedRuntime(settings), try supportsPreviews(runtime) else {
+            throw ManagerError.invalid("Preview storage needs recovery with a compatible runtime before changing this installation.")
+        }
+        let directory = URL(fileURLWithPath: runtime)
+        let process = Process()
+        process.executableURL = directory.appendingPathComponent("bin/node")
+        process.currentDirectoryURL = directory
+        process.environment = ["PATH": "/usr/bin:/bin"]
+        process.arguments = ["updater/retire-desktop-previews.ts", settings.dataPath, settings.statePath, runtime] + destinations
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw ManagerError.invalid("Could not retire the existing preview store. Check the storage and retry.")
+        }
+    }
     static func recover(settingsURL: URL, settings: inout Settings, ownLease: Bool = true) throws {
         let state = URL(fileURLWithPath: settings.statePath), journal = state.appendingPathComponent("runtime-install.json")
         guard FileManager.default.fileExists(atPath: journal.path) else { return }
@@ -31,6 +69,7 @@ final class RuntimeSelection {
         let pending = try JSONDecoder().decode(Pending.self, from: Data(contentsOf: journal))
         let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: Data(contentsOf: URL(fileURLWithPath: pending.runtime).appendingPathComponent("runtime.json")))
         try manifest.validate(version: manifest.version, revision: manifest.revision, arch: RuntimeInstaller.arch)
+        if try !supportsPreviews(pending.runtime) { try retirePreviews(settings) }
         try atomic(["release": pending.runtime], to: state.appendingPathComponent("current.json"))
         try pending.settings.save(settingsURL); settings = pending.settings
         try FileManager.default.removeItem(at: journal)
