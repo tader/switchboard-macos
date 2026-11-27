@@ -29,6 +29,11 @@ final class SettingsFlowTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: control), bytes)
         XCTAssertEqual(try Settings.load(file), settings)
         XCTAssertEqual(try String(contentsOf: occupied.appendingPathComponent("sentinel"), encoding: .utf8), "unrelated")
+        try fm.removeItem(at: occupied)
+        try fm.createSymbolicLink(atPath: data.appendingPathComponent("external-link").path, withDestinationPath: runtime.path)
+        XCTAssertThrowsError(try manager.save(next, copyData: true, copyState: true))
+        XCTAssertFalse(fm.fileExists(atPath: state.appendingPathComponent("retirement-called").path))
+        XCTAssertEqual(try Data(contentsOf: control), bytes)
     }
     @MainActor private func fixture(at file: URL) throws -> Manager {
         var settings = Settings()

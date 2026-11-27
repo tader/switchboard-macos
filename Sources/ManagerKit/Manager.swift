@@ -321,6 +321,8 @@ import LocalAuthentication
         } else if FileManager.default.fileExists(atPath: target) {
             throw ManagerError.invalid("The destination must be a new, separate folder.")
         }
+        // Reject unsupported source entries before destroying any live preview.
+        _ = try Relocation.inventory(URL(fileURLWithPath: source))
     }
     private func copyOrReconcile(from source: String, to target: String) throws {
         if let receipt = relocationReceipts[target], receipt.source == source {
