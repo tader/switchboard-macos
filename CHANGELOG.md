@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.6.0...switchboard-macos-v0.6.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* start updated servers and restore Activity previews on macOS ([f49ec55](https://github.com/tader/switchboard-macos/commit/f49ec55196efa06865d6d0234210e145a6a397b3))
+
 ## [0.6.0](https://github.com/tader/switchboard-macos/compare/switchboard-macos-v0.5.0...switchboard-macos-v0.6.0) (2026-11-26)
 
 
